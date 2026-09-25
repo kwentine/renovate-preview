@@ -1,0 +1,167 @@
+#+TITLE: renovate-preview
+#+OPTIONS: toc:2 num:nil
+
+Run Renovate against a repository and see what it would do, without reading a 2000-line log.
+
+#+begin_example
+$ renovate-preview
+⠹ 6s  found 12 dep(s) in 57 file(s); looking up versions     ← erases itself when done
+DEPENDENCY     CURRENT  NEW      FILE
+-------------  -------  -------  -----------------------------------------
+cert-manager   v1.20.2  v1.20.4  manifests/cert-manager/kustomization.yaml
+cert-manager   v1.20.2  v1.21.2  manifests/cert-manager/kustomization.yaml
+trust-manager  v0.22.0  v0.22.1  manifests/cert-manager/kustomization.yaml
+#+end_example
+
+A dry run already knows all of this. The problem is that it says so across thousands of log
+lines, in which the facts worth having — which files it even looked at, why a manager
+matched nothing, which config actually won — are invisible. This runs Renovate in a
+container, reads its structured report, and prints the answer.
+
+* Install
+
+#+begin_src sh
+make install      # puts renovate-preview on your PATH, pointing at this checkout
+make uninstall
+#+end_src
+
+The launcher points back at the checkout, so edits take effect immediately and
+=--examples= still finds =examples/=. =make install PREFIX=/usr/local= to put it elsewhere.
+
+For a real install instead, with no checkout to keep around:
+
+#+begin_src sh
+uv tool install .     # or: pipx install .
+#+end_src
+
+You also need =podman= or =docker= — whichever is on your PATH is detected automatically.
+With neither, =--runtime=local= uses a =renovate= you installed yourself
+(=npm install -g renovate=), which is also much faster to iterate with.
+
+* Day to day
+
+#+begin_src sh
+renovate-preview                          # the current directory
+renovate-preview path/to/repo             # somewhere else
+renovate-preview @org/repo                # a remote GitHub repo (RENOVATE_TOKEN if private)
+
+renovate-preview --scope extract          # just what was found: offline, no lookups, fast
+renovate-preview --scope full             # also the branch names and PR titles it would use
+
+renovate-preview --only base              # limit to a subtree
+renovate-preview --except 'overlays/**'   # ... or skip one
+renovate-preview --managers kubernetes    # limit to one manager
+
+renovate-preview --validate               # check the config and stop
+renovate-preview -o html --open           # read a large result in a browser
+renovate-preview --just-print             # show the renovate command, run nothing
+renovate-preview --run @org/repo          # a real run: creates branches and PRs
+#+end_src
+
+=--help= documents every flag.
+
+** Scope
+
+| =--scope extract= | what Renovate parsed, and nothing more. No network, no token, seconds. |
+| =--scope lookup=  | *the default.* Also resolves which upgrades are available.             |
+| =--scope full=    | Also computes the branch names and PR titles. Needs no token.          |
+
+=--scope full= works against a plain local directory: it computes everything, then declines
+to write the branches, because the local platform has no remote to push to. That last part
+is expected and is filtered out of the output.
+
+** Output
+
+| =-o table= | the default. A run that worked prints its table and nothing else.  |
+| =-o json=  | this tool's normalized structure, carrying a =schema_version=.     |
+| =-o html=  | one self-contained page — filterable, no network, opens off disk.  |
+
+=-o html= writes to stdout when piped, and otherwise writes a file and prints its path;
+=--open= launches a browser.
+
+To look at Renovate's own output rather than a summary, =--raw= takes =json= (its records as
+one JSON array), =ndjson= (verbatim, streamed), =text= (the log, rendered) or =report= (just
+its structured report object). =--log-level= filters what =--raw= shows; Renovate always
+runs at =debug= internally, so raising it never needs a re-run.
+
+Two things are never hidden: an **empty result explains itself**, and a run with problems
+prints one line on stderr saying so. Every run also keeps its complete ndjson log, and =-v=
+prints the path. =--silent= is how you say you meant it: output only, nothing else.
+
+* What it knows that you would otherwise learn the hard way
+
+Each of these exists because it cost someone an afternoon.
+
+- *Untracked files are invisible.* Renovate's local platform lists files with =git ls-files=,
+  so a manifest you have not =git add=ed extracts to nothing. The tool says which files were
+  skipped; =--untracked=include= runs against a scratch copy so they are seen.
+
+- *=git ls-files= silently falls back to globbing everything* when git errors out — which is
+  what turns 57 files into 1784 when there is a vendored =charts/= tree, because the fallback
+  does not honour =.gitignore=. Inside a container this happens because git rejects the bind
+  mount as "dubious ownership"; the tool marks it safe so it cannot, and says so loudly if it
+  happens anyway.
+
+- *=--ignore-paths= replaces rather than adds.* Renovate declares =ignorePaths= as
+  =mergeable:false=, so one CLI flag silently un-ignores =node_modules/=. The tool restates
+  Renovate's defaults, the target's own value and the ones its presets imply, and =-v= prints
+  the union it settled on. =--except= adds to that union rather than replacing it.
+
+- *=--only base= on its own matches nothing.* Renovate matches =includePaths= with
+  =file === path || minimatch(path).match(file)=, so a bare directory matches only a file of
+  that exact name. Every bare entry therefore also gets an =entry/**= companion.
+
+- *=--config= alone does not win.* A config passed as =RENOVATE_CONFIG_FILE= is merely /file/
+  config, which the target's own =renovate.json= is merged on top of. The tool nests yours
+  under Renovate's =force=, which by design outranks repository config.
+  =--config-mode=file= gives you the raw behaviour.
+
+- *=managerFilePatterns= are anchored at the repo root*, so a pattern like
+  =/^manifests/.+\.yaml$/= matches nothing when you point the tool at a subdirectory. An
+  empty result says this.
+
+* Examples
+
+[[file:examples/][=examples/=]] holds one minimal, runnable fixture per Renovate feature: the smallest
+manifest that exercises it, a =renovate.json= containing that feature and nothing else, a
+README explaining what to look for, and an =expected.json= the runner checks against.
+
+#+begin_src sh
+renovate-preview examples/custom-manager-jsonata   # one example, full output
+make examples                                      # all of them, checked, offline
+make examples-network                              # also the ones needing lookups
+#+end_src
+
+They are documentation that cannot go stale unnoticed. Adding one is four steps, described
+in [[file:examples/README.md][=examples/README.md=]].
+
+* Environment
+
+Named after Renovate's own variables wherever there is a corresponding one.
+
+| =RENOVATE_TOKEN=                                     | GitHub PAT. Raises datasource rate limits, reaches private repositories, and is required by =--run=. It does /not/ change how deep a dry run goes. |
+| =RENOVATE_GITHUB_COM_TOKEN=, =RENOVATE_HOST_RULES=   | forwarded to Renovate when set, via =detectHostRulesFromEnv=                                                                                       |
+| =RENOVATE_PREVIEW_RUNTIME=                           | default for =--runtime= (=auto=, =podman=, =docker=, =local=)                                                                                      |
+| =RENOVATE_PREVIEW_IMAGE=, =RENOVATE_PREVIEW_TAG=     | default image and tag, i.e. which Renovate version to run                                                                                          |
+| =RENOVATE_PREVIEW_EXAMPLES=                          | where =--examples= looks for the fixtures                                                                                                          |
+
+The tool says which of these are missing /before/ the run, rather than leaving you to
+diagnose a rate-limited lookup that looks exactly like "no updates available".
+
+Renovate's cache lives in a named container volume between runs (=--no-cache=,
+=--reset-cache=, =--cache-volume=).
+
+* Development
+
+#+begin_src sh
+make test      # unit tests: pure logic, never invokes Renovate
+make check     # ... and the end-to-end fixtures
+make lint      # ruff, if installed
+make build     # a wheel and an sdist
+#+end_src
+
+| =src/renovate_preview/config.py=  | Renovate's config-merging rules, as this tool has to restate them |
+| =src/renovate_preview/logs.py=    | the shape of Renovate's structured output                         |
+| =src/renovate_preview/runtime.py= | podman, docker, or a local install                                |
+| =src/renovate_preview/diagnose.py= | why a result is surprising                                       |
+| =src/renovate_preview/render/=    | table, JSON, HTML, and Renovate's own log                         |
