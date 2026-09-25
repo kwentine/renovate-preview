@@ -58,6 +58,9 @@ renovate-preview --silent
 
 # Run a given renovate version
 renovate-preview --image ghcr.io/renovatebot/renovate --tag 44.115.2
+
+# Show the corresponding renovate command
+renovate-preview --managers kubernetes --only base/ --just-print
 ```
 
 # Technical guidelines
