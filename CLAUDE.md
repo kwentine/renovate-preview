@@ -71,6 +71,7 @@ renovate-preview --image ghcr.io/renovatebot/renovate --tag 44.115.2
 - The README should be concise and document the most straightforward and practical day-to-day workflows.
 - This repository should have a `renovate.json` file :)
 
+
 ## Implementation
 
 - The general idea is to produce human-readable output from parsing the `json` output of renovate `--dry-run`.
@@ -79,3 +80,20 @@ renovate-preview --image ghcr.io/renovatebot/renovate --tag 44.115.2
 - environment variables, whe used by `renovate-preview`, should be named like the corresponding `renovate` ones whenever possible
   and the user should be clearly informed of missing credentials when running against a remote repo,
   or fetching updates from container repositories that require authentication.
+
+# Work methodology
+
+You are working in an isolated Fedora 44 container with common tools in the environment.
+You should let me know any additional tools you would find useful. Go ahead and perform user-installs as you see fit.
+You can also create and edit the `claude.Dockerfile` of your dreams! Perhaps that is where you will wake up the next time we interact.
+
+In addition to terminal interaction, we use a set of `.org` files to organize our work.
+They are written in the Emacs `org-mode` format.
+
+- When asked to plan, use the file `PLAN.org`
+- I provide feedback and questions in `FEEDBACK.org`
+- Lengthy answers should be abbreviated in the chat, and expanded in `ANSWERS.org`
+- I keep a list of tasks (`org-mode` TODO entries) in `TASKS.org`
+  You can toggle them to DONE or DOING as you see fit, an include comments in the subtree.
+
+I may change my mind, but for now do not commit changes to git yourself, leave that to me.
