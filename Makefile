@@ -8,7 +8,7 @@
 
 PREFIX  ?= $(HOME)/.local
 BINDIR  ?= $(PREFIX)/bin
-NAME    ?= renovate_check
+NAME    ?= renovate-preview
 # Override to exercise a user install of Renovate instead of the podman image:
 #   make examples RUNTIME=local
 RUNTIME ?= podman
