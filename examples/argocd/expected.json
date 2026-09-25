@@ -1,0 +1,6 @@
+{
+  "scope": "extract",
+  "dependencies": [
+    {"dependency": "example-chart", "current": "1.2.3", "manager": "argocd", "file": "application.yaml"}
+  ]
+}

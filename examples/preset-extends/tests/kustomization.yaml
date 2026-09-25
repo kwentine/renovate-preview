@@ -1,0 +1,10 @@
+# Deliberately under tests/: config:best-practices pulls in :ignoreModulesAndTests,
+# which adds **/tests/** to ignorePaths, so this chart is NOT extracted.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: trust-manager
+    repo: https://charts.jetstack.io
+    version: v0.22.0
+    releaseName: trust-manager

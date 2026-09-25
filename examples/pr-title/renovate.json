@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "matchManagers": ["kustomize"],
+      "commitMessageTopic": "{{prettyDepType}} {{#if (containsString depName '/')}}{{depName}}{{else}}{{replace '/base$' '' (replace '^manifests/' '' packageFileDir)}}/{{depName}}{{/if}}"
+    }
+  ],
+  "semanticCommits": "enabled"
+}

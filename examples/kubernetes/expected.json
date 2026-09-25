@@ -1,0 +1,7 @@
+{
+  "scope": "extract",
+  "dependencies": [
+    {"dependency": "DaemonSet", "current": "apps/v1", "manager": "kubernetes", "file": "daemonset.yaml"},
+    {"dependency": "docker.io/library/busybox", "current": "1.36", "manager": "kubernetes", "file": "daemonset.yaml"}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "description": "Set separateMultipleMinor with exceptions",
+      "matchPackageNames": [
+        "!renovate",
+        "!loki"
+      ],
+      "separateMultipleMinor": true
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "customManagers": [
+    {
+      "customType": "jsonata",
+      "fileFormat": "yaml",
+      "managerFilePatterns": ["/^grafana\\.yaml$/"],
+      "matchStrings": ["spec.{ \"currentValue\": version }"],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "grafana/grafana"
+    }
+  ]
+}

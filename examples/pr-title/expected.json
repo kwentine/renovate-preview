@@ -1,0 +1,12 @@
+{
+  "scope": "full",
+  "network": true,
+  "dependencies": [
+    {"dependency": "cert-manager", "current": "v1.20.2", "manager": "kustomize", "file": "manifests/cert-manager/kustomization.yaml"},
+    {"dependency": "trust-manager", "current": "v0.22.0", "manager": "kustomize", "file": "manifests/trust-manager/base/kustomization.yaml"}
+  ],
+  "pr_title_patterns": [
+    "^chore\\(deps\\): update helmchart cert-manager/cert-manager to v",
+    "^chore\\(deps\\): update helmchart trust-manager/trust-manager to v"
+  ]
+}
