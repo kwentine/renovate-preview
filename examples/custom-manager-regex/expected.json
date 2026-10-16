@@ -1,5 +1,4 @@
 {
-  "scope": "extract",
   "dependencies": [
     {"dependency": "example-org/example-tool", "current": "v2.19.1", "manager": "regex", "file": "depname-captured.yaml"},
     {"dependency": "example-org/example-operator", "current": "v5.22.2", "manager": "regex", "file": "depname-template.yaml"}

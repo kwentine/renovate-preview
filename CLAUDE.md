@@ -135,7 +135,8 @@ with the aforementioned main objectives as "north stars".
 # Work methodology
 
 You are working in an isolated Fedora 44 container with common tools in the environment.
-You should let me know any additional tools you would find useful. Go ahead and perform user-installs as you see fit.
+You should let me know any additional tools you would find useful.
+Go ahead and perform all installations you see fit, and clone Github repositories that may be useful for the work.
 You can also create and edit the `claude.Dockerfile` of your dreams! Perhaps that is where you will wake up the next time we interact.
 
 In addition to terminal interaction, we use a set of `.org` files to organize our work.
@@ -143,7 +144,7 @@ They are written in the Emacs `org-mode` format.
 
 - I provide feedback and questions in `FEEDBACK.org`
 - I keep a list of tasks (`org-mode` TODO entries) in `TODO.org`
-  You can toggle them to DONE or DOING as you see fit, an include comments in the subtree.
+  You can toggle them to DONE or DOING as you see fit, and include comments in the subtree.
   Lengthy answers and plans should be abbreviated in the chat, and expanded in the corresponding TODO subtree.
   Please consider I am a human with limited cognitive bandwidth. Be brief, provide key links, highlight most important arguments.
   I may use the tags :plan: and :question:.

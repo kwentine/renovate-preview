@@ -1,7 +1,8 @@
 # semanticCommits and commitMessageTopic
 
-Two settings from this repo's top-level `renovate.json` that shape the PR *title* rather
-than what gets found, so they only show up at `--scope=full`:
+Two settings that shape the PR *title* rather than what gets found. PR titles only exist in
+a full dry run, which Renovate's local platform does not do (it stops at version lookups),
+so they show up only against a remote repository, `renovate-preview @org/repo`:
 
 - `"semanticCommits": "enabled"` — prefixes every title with `chore(deps):`. Renovate
   otherwise auto-detects this from git history and lands on "disabled" in a fresh fixture,
@@ -21,7 +22,7 @@ manifests/trust-manager/base/kustomization.yaml   -> trust-manager
 ```
 
 ```
-$ renovate_check renovate-examples/pr-title --scope=full
+$ renovate-preview @org/repo   # a repository with this config and layout
 ```
 
 Expected titles (the versions move, the shape does not):

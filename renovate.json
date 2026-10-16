@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "description": "renovate-preview has no runtime dependencies, so there is little here. What there is matters: the fixtures under examples/ pin deliberately outdated versions, and an upgrade PR against one of them would break the expectation it exists to illustrate.",
+  "ignorePaths": ["examples/**"],
+  "packageRules": [
+    {
+      "description": "Group the GitHub Actions bumps into one PR rather than a weekly trickle.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ]
+}

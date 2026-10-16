@@ -1,5 +1,4 @@
 {
-  "scope": "extract",
   "dependencies": [
     {"dependency": "grafana/grafana", "current": "13.0.1", "manager": "jsonata", "file": "grafana.yaml"}
   ]

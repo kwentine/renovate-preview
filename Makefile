@@ -1,57 +1,49 @@
-# renovate_check - install, test and lint the Renovate debugging helper.
+# renovate-preview
 #
-#   make install     symlink it into ~/.local/bin as renovate_check
-#   make test        unit tests (fast, no Renovate needed)
-#   make examples    end-to-end fixtures (needs podman, or RUNTIME=local)
-#   make check       both
-#   make uninstall   remove the symlink
+#   make install     put renovate-preview on your PATH, running from this checkout
+#   make uninstall   take it off again
+#   make test        unit tests (never run Renovate)
+#   make examples    check examples/ against a real Renovate (RUNTIME=local to skip containers)
+#   make lint        ruff
+#   make build       wheel and sdist, for PyPI
 
-PREFIX  ?= $(HOME)/.local
-BINDIR  ?= $(PREFIX)/bin
-NAME    ?= renovate-preview
-# Override to exercise a user install of Renovate instead of the podman image:
-#   make examples RUNTIME=local
-RUNTIME ?= podman
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
+PYTHON ?= python3
+RUNTIME ?= auto
 
-HERE    := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-SCRIPT  := $(HERE)/renovate.py
-TARGET  := $(BINDIR)/$(NAME)
-PYTHON  ?= python3
+SRC    := $(abspath src)
+TARGET := $(BINDIR)/renovate-preview
 
-.PHONY: help install uninstall test examples examples-network check lint
+export PYTHONPATH := $(SRC)
 
-help:
-	@sed -n '2,8p' $(firstword $(MAKEFILE_LIST)) | sed 's/^# \?//'
-	@echo
-	@echo "Variables: PREFIX=$(PREFIX) NAME=$(NAME) RUNTIME=$(RUNTIME)"
+.PHONY: install uninstall test examples lint build clean
 
-# A symlink rather than a copy, deliberately: renovate.py finds renovate-examples/ next to
-# its own resolved path, so a symlink keeps `renovate_check --examples` working and picks up
-# edits to the checkout immediately. A copy would be a stale orphan with no fixtures.
-install: $(SCRIPT)
+# A launcher rather than a copy, so edits to the checkout take effect immediately.
+# `rm -f` first: writing through a symlink left by an older install would clobber its target.
+install:
 	@mkdir -p $(BINDIR)
-	@ln -sfn $(SCRIPT) $(TARGET)
-	@echo "installed $(TARGET) -> $(SCRIPT)"
-	@case ":$$PATH:" in \
-	  *":$(BINDIR):"*) ;; \
-	  *) echo "warning: $(BINDIR) is not on your PATH" ;; \
-	esac
+	@rm -f $(TARGET)
+	@printf '#!/bin/sh\nPYTHONPATH="$(SRC)" exec $(PYTHON) -m renovate_preview "$$@"\n' > $(TARGET)
+	@chmod +x $(TARGET)
+	@echo "installed $(TARGET)"
 
 uninstall:
-	@if [ -L $(TARGET) ]; then rm -f $(TARGET) && echo "removed $(TARGET)"; \
-	elif [ -e $(TARGET) ]; then echo "refusing to remove $(TARGET): not a symlink"; exit 1; \
-	else echo "$(TARGET) is not installed"; fi
+	rm -f $(TARGET)
 
 test:
-	@$(PYTHON) $(HERE)/test_renovate.py
+	$(PYTHON) -m unittest discover -s tests -t . -q
 
 examples:
-	@$(SCRIPT) --runtime=$(RUNTIME) --examples
-
-examples-network:
-	@$(SCRIPT) --runtime=$(RUNTIME) --examples --with-network
-
-check: test examples
+	RENOVATE_PREVIEW_E2E=1 RENOVATE_PREVIEW_RUNTIME=$(RUNTIME) \
+	  $(PYTHON) -m unittest tests.test_examples -v
 
 lint:
-	@$(PYTHON) -m compileall -q $(SCRIPT) $(HERE)/test_renovate.py && echo "syntax ok"
+	ruff check src tests && ruff format --check src tests
+
+build:
+	uv build
+
+clean:
+	rm -rf dist build
+	find src tests -name __pycache__ -type d -exec rm -rf {} +

@@ -1,12 +1,5 @@
 {
-  "scope": "full",
-  "network": true,
   "dependencies": [
     {"dependency": "trust-manager", "current": "v0.22.0", "manager": "kustomize", "file": "kustomization.yaml"}
-  ],
-  "min_updates": 3,
-  "branch_patterns": [
-    "^renovate/trust-manager-0\\.23\\.x$",
-    "^renovate/trust-manager-0\\.24\\.x$"
   ]
 }

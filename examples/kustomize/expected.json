@@ -1,5 +1,4 @@
 {
-  "scope": "extract",
   "dependencies": [
     {"dependency": "cert-manager", "current": "v1.20.2", "manager": "kustomize", "file": "kustomization.yaml"}
   ]
