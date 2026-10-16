@@ -69,6 +69,17 @@ def summarize(target: str, records: list[dict]) -> dict:
     }
 
 
+UPDATE_KEYS = (
+    "new",
+    "type",
+    "branch",
+    "age_days",
+    "release_timestamp",
+    "pending_checks",
+    "pending_versions",
+)
+
+
 def dependency_rows(manager: str, package_file: dict) -> list[dict]:
     """One row per dependency, or one per available update when there are some."""
     rows = []
@@ -84,7 +95,7 @@ def dependency_rows(manager: str, package_file: dict) -> list[dict]:
         }
         updates = dep.get("updates") or []
         if not updates:
-            rows.append({**base, "new": None, "type": None, "branch": None})
+            rows.append({**base, **dict.fromkeys(UPDATE_KEYS)})
         for update in updates:
             new = update.get("newValue") or update.get("newVersion")
             digest = update.get("newDigest")
@@ -97,6 +108,13 @@ def dependency_rows(manager: str, package_file: dict) -> list[dict]:
                     "new": new,
                     "type": update.get("updateType"),
                     "branch": update.get("branchName"),
+                    # Absent when the datasource gives no release timestamp.
+                    "age_days": update.get("newVersionAgeInDays"),
+                    "release_timestamp": update.get("releaseTimestamp"),
+                    # minimumReleaseAge (or minimumConfidence) not met yet: either this
+                    # update itself, or newer versions held back in favour of this one.
+                    "pending_checks": bool(update.get("pendingChecks")),
+                    "pending_versions": update.get("pendingVersions") or [],
                 }
             )
     return rows

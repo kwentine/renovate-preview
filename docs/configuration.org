@@ -2,7 +2,7 @@
 #+OPTIONS: toc:nil num:nil
 
 Renovate combines configuration from several places. Knowing which one wins explains
-most surprises. Every result on this page comes from a real run (Renovate 44.115.10).
+most surprises.
 
 * The layers
 
@@ -13,37 +13,63 @@ From lowest to highest priority:
 | 3. repository config  | the repository's =renovate.json=, or your =renovate-preview --config= file instead |
 | 4. command line       | Renovate flags: =--only=, =--except=, =--managers=, anything after =--=     |
 
-- *Repository over global.* The repository config is merged over the global config. Most
-  settings are replaced, but lists such as =packageRules= are appended to.
-- *The command line wins.* Renovate's =forceCli= option, on by default, makes command-line
-  flags override the repository config too. =RENOVATE_*= variables do not.
+When two layers set the same option, the higher one's value is used. Options that only
+one layer sets are kept.
+
+- *The repository config wins over the global one.* Most of its settings replace the global ones,
+  but lists such as =packageRules= are appended to.
+- *The command line wins.* Renovate's =forceCli= option, on by default, gives command-line
+  flags priority over the repository config too. =RENOVATE_*= variables don't have it: they
+  are global config.
 - *=renovate-preview --config=your-file= replaces the repository config, rather than merging with it.* The repository is
   treated as if it had no =renovate.json=. Behind the scenes:
   =RENOVATE_ADDITIONAL_CONFIG_FILE=your-file= and =RENOVATE_REQUIRE_CONFIG=ignored= (=--just-print= shows the full command).
 
-* The example repository
+* The demo repository
 
-The scenarios below use a hypothetical =org/demo= repository, which has two identical manifests and this config:
+The scenarios below use a small =org/demo= repository. Its files are in
+[[file:demo/repo/][=docs/demo/repo/=]]: two identical manifests, and a config that ignores
+one of them and groups all updates.
 
-#+begin_example
-org/demo
-├── a/kustomization.yaml      cert-manager v1.20.2
-├── b/kustomization.yaml      cert-manager v1.20.2
-└── renovate.json             {"ignorePaths": ["a/**"],
-                               "packageRules": [{"matchPackageNames": ["*"],
-                                                 "groupName": "remote group"}]}
-#+end_example
+=renovate.json=
+#+begin_src json :tangle demo/repo/renovate.json :mkdirp yes
+{
+  "ignorePaths": ["a/**"],
+  "packageRules": [{ "matchPackageNames": ["*"], "groupName": "remote group" }]
+}
+#+end_src
 
-They also use these two local files:
+=a/kustomization.yaml=
+#+begin_src yaml :tangle demo/repo/a/kustomization.yaml :mkdirp yes
+helmCharts:
+- name: cert-manager
+  repo: https://charts.jetstack.io
+  version: v1.20.2
+#+end_src
 
-#+begin_example
-mine.json      {"ignorePaths": ["b/**"]}                  a repository config of your own
-global.json    {"commitMessagePrefix": "[global]"}        a self-hosted (global) config
-#+end_example
+=b/kustomization.yaml=
+#+begin_src yaml :tangle demo/repo/b/kustomization.yaml :mkdirp yes
+helmCharts:
+- name: cert-manager
+  repo: https://charts.jetstack.io
+  version: v1.20.2
+#+end_src
+
+Two more files, in [[file:demo/][=docs/demo/=]], stay on your machine:
+
+=mine.json=, a repository config of your own
+#+begin_src json :tangle demo/mine.json
+{ "ignorePaths": ["b/**"] }
+#+end_src
+
+=global.json=, a self-hosted (global) config
+#+begin_src json :tangle demo/global.json
+{ "commitMessagePrefix": "[global]" }
+#+end_src
 
 * Scenarios
 
-** The repository's own config
+** 1. The repository's own config
 
 #+begin_src sh
 renovate-preview @org/demo
@@ -54,7 +80,7 @@ renovate-preview @org/demo
 
 =a/= is ignored and the update is grouped, both as the repository's config says.
 
-** Your config takes precedence
+** 2. Your config instead of the repository's
 
 #+begin_src sh
 renovate-preview @org/demo --config mine.json
@@ -67,7 +93,7 @@ The repository's config is gone *entirely*: =a/= is no longer ignored, and there
 group, even though =mine.json= says nothing about grouping. This is how you check a config
 change against a real repository before pushing it.
 
-** A global config under the repository's
+** 3. A global config and the repository's: both apply, the repository's wins
 
 #+begin_src sh
 RENOVATE_CONFIG_FILE=global.json renovate-preview @org/demo
@@ -80,7 +106,7 @@ Both apply: the prefix comes from the global config, and the ignored path and th
 from the repository's. Had the two set the same option, the repository's would have won:
 with =global.json= setting =ignorePaths: ["b/**"]=, =b/= is still scanned.
 
-** A global config under yours
+** 4. A global config and yours: both apply, yours wins
 
 #+begin_src sh
 RENOVATE_CONFIG_FILE=global.json renovate-preview @org/demo --config mine.json
@@ -89,11 +115,12 @@ RENOVATE_CONFIG_FILE=global.json renovate-preview @org/demo --config mine.json
 | FILE                   | BRANCH                      | PR TITLE                                               |
 | =a/kustomization.yaml= | =renovate/cert-manager-1.x= | [global] Update Helm release cert-manager to v1.21.2 |
 
-=--config= replaces only the repository layer. Use the self-hosted config of the Renovate
-instance that will run on the repository, and the preview matches what that instance does.
-=extends= works in both files, and the presets combine.
+=--config= replaces only the repository layer: the global config still applies. Use the
+self-hosted config of the Renovate instance that will run on the repository, and the
+preview matches what that instance does. =extends= works in both files, and the presets
+combine.
 
-** The command line over everything
+** 5. Command-line flags win over every config
 
 #+begin_src sh
 renovate-preview @org/demo -- --ignore-paths='b/**'
@@ -103,33 +130,64 @@ renovate-preview @org/demo -- --ignore-paths='b/**'
 | =a/kustomization.yaml= | =renovate/remote-group= |
 
 The flag replaces the repository's =ignorePaths=: =a/= is back, =b/= is gone.
-=RENOVATE_IGNORE_PATHS='["b/**"]'= instead changes nothing: as global config, it sits under
-the repository's.
+=RENOVATE_IGNORE_PATHS='["b/**"]'= instead changes nothing: it is global config, so the
+repository's =ignorePaths= wins over it.
 
-=--only=, =--except= and =--managers= are flags too, so they override the repository config
+=--only=, =--except= and =--managers= are flags too, so they win over the repository config
 the same way. That is why =--except= has to restate the =ignorePaths= it keeps (see the
 README).
 
-** A local repository
+** 6. A local repository
 
 #+begin_src sh
-cd demo && renovate-preview
+cd docs/demo/repo && renovate-preview
 #+end_src
+
+| FILE                   | BRANCH                  |
+| =b/kustomization.yaml= | =renovate/remote-group= |
 
 The repository's own =renovate.json= is always read, because Renovate's local platform
 forces =requireConfig=optional=. So =--config= is refused for a local repository: edit
 =renovate.json= itself, which is the point of previewing locally. A global config
 (=RENOVATE_CONFIG_FILE=) works as in scenario 3.
 
+=docs/demo/repo= works as a local repository from within this project's checkout: Renovate
+sees the files that git tracks, in the current directory.
 
 * Reproducing these
 
-The scenarios ran against a local [[https://forgejo.org][Forgejo]] rather than GitHub. The
-configuration logic is the same on every platform, and =renovate-preview= reaches other
-platforms through Renovate's own variables:
+Scenarios 1 to 5 need =org/demo= on a real platform, as a remote repository.
+
+** On GitHub
+
+Create a repository holding the files of =docs/demo/repo/=, then, from =docs/demo/=:
+
+#+begin_src sh
+export RENOVATE_TOKEN=...       # a GitHub token that can read the repository
+renovate-preview @you/demo --config mine.json
+#+end_src
+
+** On a local Forgejo
+
+Without a GitHub account, or to keep it all on your machine: [[https://forgejo.org][Forgejo]]
+is a self-hosted Git forge, a single binary, and Renovate supports it as a platform. The
+results above come from it. The configuration logic is the same on every platform.
+
+1. Install and start it: see [[https://forgejo.org/docs/latest/admin/installation/binary/][Forgejo's binary installation]].
+   =forgejo web= serves on =http://localhost:3000=, and the first visit runs the setup:
+   SQLite is enough.
+2. Register a user, with an email address such as =you@example.com=: Renovate rejects one
+   without a domain, like =you@localhost=.
+3. Create an access token (Settings → Applications), with the scopes listed in
+   [[https://docs.renovatebot.com/modules/platform/forgejo/][Renovate's Forgejo docs]].
+4. Create a repository =demo=, and push the files of =docs/demo/repo/= to it.
+5. Point =renovate-preview= at it, then run the scenarios from =docs/demo/=:
 
 #+begin_src sh
 export RENOVATE_PLATFORM=forgejo RENOVATE_ENDPOINT=http://localhost:3000/api/v1
-export RENOVATE_TOKEN=...
-renovate-preview @renovate/demo --config mine.json
+export RENOVATE_TOKEN=...       # the token
+renovate-preview @you/demo --config mine.json
 #+end_src
+
+=RENOVATE_PLATFORM= and =RENOVATE_ENDPOINT= are Renovate's own variables: the same two reach
+a GitLab, a Gitea, or a GitHub Enterprise.

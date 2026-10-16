@@ -10,6 +10,8 @@ COLUMNS = (
     ("CURRENT", "current"),
     ("NEW", "new"),
     ("TYPE", "type"),
+    ("AGE", "age_days"),
+    ("PENDING", "pending"),
     ("FILE", "file"),
     ("BRANCH", "branch"),
     ("PR TITLE", "pr_title"),
@@ -17,14 +19,34 @@ COLUMNS = (
 
 
 def columns(rows: list[dict]) -> list[tuple[str, str]]:
-    """The columns with something in them (e.g. --just-extract has no NEW)."""
-    return [(title, key) for title, key in COLUMNS if any(cell(row, key) != "-" for row in rows)]
+    """The columns with something in them (e.g. --just-extract has no NEW). AGE stays with
+    the updates even when empty: a missing release date is worth seeing."""
+    return [
+        (title, key)
+        for title, key in COLUMNS
+        if any(cell(row, "new" if key == "age_days" else key) != "-" for row in rows)
+    ]
 
 
 def cell(row: dict, key: str) -> str:
     if key == "new" and not row["new"] and row["skip_reason"]:
         return f"(skipped: {row['skip_reason']})"
+    if key == "age_days" and row["age_days"] is not None:
+        return f"{row['age_days']} day{'' if row['age_days'] == 1 else 's'}"
+    if key == "pending":
+        return pending(row)
     return str(row[key] or "-")
+
+
+def pending(row: dict) -> str:
+    """Like the Pending column of Renovate's PRs: "yes" when this update itself waits for
+    its checks (e.g. minimumReleaseAge), else the newest version held back, if any."""
+    if row["pending_checks"]:
+        return "yes"
+    held = row["pending_versions"] or []
+    if not held:
+        return "-"
+    return held[-1] + (f" (+{len(held) - 1})" if len(held) > 1 else "")
 
 
 def table(document: dict) -> str:
@@ -47,10 +69,11 @@ def to_json(document: dict) -> str:
 STYLE = """
 :root { color-scheme: light dark; --bg: #fbfbfa; --panel: #fff; --ink: #1c1c1a;
   --muted: #6a6a64; --line: #e3e3de; --major: #b3261e; --minor: #9a6700; --patch: #2f6f4f;
-  --other: #5a5a8c; }
+  --other: #5a5a8c; --warn-bg: #fbe3c2; --warn-ink: #7a4400; --pending-bg: #e6e8f6; }
 @media (prefers-color-scheme: dark) { :root { --bg: #17171a; --panel: #1f1f23;
   --ink: #e9e9e4; --muted: #9a9a92; --line: #33333a; --major: #ff8a80; --minor: #e3b341;
-  --patch: #7fc0a0; --other: #a5a5e0; } }
+  --patch: #7fc0a0; --other: #a5a5e0; --warn-bg: #4a3212; --warn-ink: #f2c27a;
+  --pending-bg: #2a2c42; } }
 body { margin: 0; padding: 2rem 1rem; background: var(--bg); color: var(--ink);
   font: 15px/1.5 system-ui, sans-serif; }
 main { max-width: 80rem; margin: 0 auto; }
@@ -68,6 +91,9 @@ th { font-size: .7rem; text-transform: uppercase; color: var(--muted); position:
 code, .mono { font-family: ui-monospace, monospace; font-size: .8rem; }
 .badge { font-size: .7rem; font-weight: 650; text-transform: uppercase; color: var(--other); }
 .major { color: var(--major); } .minor { color: var(--minor); } .patch { color: var(--patch); }
+.warn { background: var(--warn-bg); color: var(--warn-ink); font-weight: 650; }
+.pending { background: var(--pending-bg); }
+span.warn, span.pending { padding: 0 .3rem; border-radius: .2rem; }
 pre { white-space: pre-wrap; color: var(--muted); font-size: .8rem; }
 """
 
@@ -79,6 +105,9 @@ box?.addEventListener('input', () => {
   for (const row of rows) row.hidden = q && !row.textContent.toLowerCase().includes(q);
 });
 """
+
+
+MONO = ("current", "new", "age_days", "pending", "file", "branch")
 
 
 def esc(value) -> str:
@@ -97,8 +126,23 @@ def html_page(document: dict) -> str:
             value = esc(cell(row, key))
             if key == "new" and row["type"]:
                 value += f' <span class="badge {esc(row["type"])}">{esc(row["type"])}</span>'
-            mono = key in ("current", "new", "file", "branch")
-            cells.append(f'<td class="mono">{value}</td>' if mono else f"<td>{value}</td>")
+            classes = ["mono"] if key in MONO else []
+            hint = ""
+            if key == "age_days" and row["new"] and row["age_days"] is None:
+                classes.append("warn")
+                hint = "No release date: Renovate can't check minimumReleaseAge"
+            elif key == "age_days" and row["release_timestamp"]:
+                hint = f"Released {row['release_timestamp']}"
+            elif key == "pending" and value != "-":
+                classes.append("pending")
+                hint = (
+                    "This update waits for its checks, such as minimumReleaseAge"
+                    if row["pending_checks"]
+                    else "Newer versions wait for checks: " + ", ".join(row["pending_versions"])
+                )
+            attrs = f' class="{" ".join(classes)}"' if classes else ""
+            attrs += f' title="{esc(hint)}"' if hint else ""
+            cells.append(f"<td{attrs}>{value}</td>")
         body.append(f"<tr>{''.join(cells)}</tr>")
 
     updates = sum(1 for row in rows if row["new"])
@@ -112,6 +156,19 @@ def html_page(document: dict) -> str:
         sections.append(
             f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>"
         )
+        legend = []
+        if any(row["new"] and row["age_days"] is None for row in rows):
+            legend.append(
+                '<span class="warn">AGE -</span> no release date: Renovate can\'t check'
+                " minimumReleaseAge"
+            )
+        if any(pending(row) != "-" for row in rows):
+            legend.append(
+                '<span class="pending">PENDING</span> waiting for checks such as'
+                " minimumReleaseAge: yes for this update, or the newest version held back"
+            )
+        if legend:
+            sections.append(f'<p class="sub">{"<br>".join(legend)}</p>')
     else:
         sections.append("<p>No dependencies found.</p>")
     if document["problems"]:

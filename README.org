@@ -7,10 +7,10 @@ Dry-run [[https://docs.renovatebot.com/][Renovate]] against a repository, and re
 $ cd path/to/repo
 $ $EDITOR renovate.json
 $ renovate-preview
-DEPENDENCY     CURRENT  NEW      TYPE   FILE                BRANCH
--------------  -------  -------  -----  ------------------  -----------------------------
-trust-manager  v0.22.0  v0.22.1  patch  kustomization.yaml  renovate/trust-manager-0.x
-trust-manager  v0.22.0  v0.25.0  minor  kustomization.yaml  renovate/trust-manager-0.25.x
+DEPENDENCY     CURRENT  NEW      TYPE   AGE       FILE                BRANCH
+-------------  -------  -------  -----  --------  ------------------  -----------------------------
+trust-manager  v0.22.0  v0.22.1  patch  179 days  kustomization.yaml  renovate/trust-manager-0.x
+trust-manager  v0.22.0  v0.25.0  minor  34 days   kustomization.yaml  renovate/trust-manager-0.25.x
 #+end_example
 
 * Install
@@ -73,8 +73,8 @@ For a remote repository, =--config FILE= replaces the repository's config entire
 had none. This lets you check a config change against the real repository before pushing
 it, with PR titles, because the dry run on a remote repository is complete.
 
-=RENOVATE_CONFIG_FILE= adds a self-hosted (global) config under either one.
-Command-line flags override them all.
+=RENOVATE_CONFIG_FILE= adds a self-hosted (global) config. The repository config (or
+yours) wins over it, and command-line flags win over both.
 [[file:docs/configuration.org][=docs/configuration.org=]] walks through the combinations.
 
 * Good to know
@@ -82,6 +82,11 @@ Command-line flags override them all.
 - *No PR titles for a local repository.* Renovate's local platform stops after version
   lookups (=--dry-run=full= is silently downgraded to =lookup=), so branch names are known
   but PR titles are not. Against =@org/repo= the dry run is complete.
+- *AGE and PENDING come from =minimumReleaseAge=.* AGE is the new version's age, empty when
+  the registry gives no release date (many container registries don't). Renovate then
+  can't check =minimumReleaseAge=, and by default holds the update back. PENDING is =yes=
+  when the update itself waits for its checks, or names the newest version held back,
+  like the Pending column of Renovate's PRs. =-o html= highlights both.
 - *Only files known to git are seen.* Renovate lists files with =git ls-files=, so =git add=
   a new manifest before previewing it.
 - *=--except= replaces what presets ignore.* A command-line =ignorePaths= replaces the

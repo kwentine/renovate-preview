@@ -5,6 +5,8 @@ from renovate_preview.renovate import parse_record
 from renovate_preview.report import dependency_rows, summarize
 
 LOOKUP = Path(__file__).parent / "data" / "lookup.ndjson"
+# A real run with minimumReleaseAge (Renovate 44.164.10, October 2026).
+RELEASE_AGE = Path(__file__).parent / "data" / "release-age.ndjson"
 
 
 def records(path=LOOKUP):
@@ -65,6 +67,32 @@ class SummarizeTests(unittest.TestCase):
         document = summarize("@o/r", [{"msg": "Printing report", "report": report}])
         self.assertEqual(document["updates"][0]["pr_title"], "Update a to 2")
         self.assertEqual(document["branches"][0]["upgrades"], ["a"])
+
+
+class ReleaseAgeTests(unittest.TestCase):
+    """minimumReleaseAge of 14 days; 36 for cert-manager, 3650 for trust-manager."""
+
+    def setUp(self):
+        rows = summarize("x", records(RELEASE_AGE))["updates"]
+        self.rows = {row["dependency"].rsplit("/", 1)[-1]: row for row in rows}
+
+    def test_age(self):
+        self.assertEqual(self.rows["busybox"]["age_days"], 23)
+        self.assertEqual(self.rows["busybox"]["release_timestamp"], "2026-09-23T07:57:56.056Z")
+
+    def test_no_release_date(self):
+        # Not on the registry; and minimumReleaseAgeBehaviour=timestamp-required by default.
+        self.assertIsNone(self.rows["pause"]["age_days"])
+        self.assertTrue(self.rows["pause"]["pending_checks"])
+
+    def test_too_young(self):
+        self.assertEqual(self.rows["trust-manager"]["age_days"], 34)
+        self.assertTrue(self.rows["trust-manager"]["pending_checks"])
+
+    def test_newer_version_held_back(self):
+        row = self.rows["cert-manager"]
+        self.assertEqual((row["new"], row["pending_versions"]), ("v1.21.1", ["v1.21.2"]))
+        self.assertFalse(row["pending_checks"])
 
 
 class DependencyRowTests(unittest.TestCase):
