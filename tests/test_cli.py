@@ -1,7 +1,9 @@
 import contextlib
 import io
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from renovate_preview.cli import main, parse_args
@@ -18,6 +20,28 @@ def run(*argv, env=None):
     return code, out.getvalue(), err.getvalue()
 
 
+def fake_renovate(*lines, status=0):
+    """Stands in for the container: its output is `lines`."""
+
+    def fake(argv, on_line):
+        for line in lines:
+            on_line(line)
+        return status, list(lines)
+
+    return mock.patch.multiple(
+        "renovate_preview.container",
+        run=fake,
+        detect_engine=mock.Mock(return_value="podman"),
+    )
+
+
+REPORT = '{"level":30,"msg":"Printing report","report":{"problems":[],"repositories":{}}}'
+LINES = (
+    '{"level":30,"msg":"Renovate started","renovateVersion":"44.209.0"}',
+    REPORT,
+)
+
+
 class ArgumentTests(unittest.TestCase):
     def test_everything_after_double_dash_is_passed_through(self):
         opts = parse_args(["repo", "--", "--foo", "--", "bar"])
@@ -27,25 +51,87 @@ class ArgumentTests(unittest.TestCase):
     def test_contradictions_are_rejected(self):
         for argv in (
             ["--silent", "--verbose"],
-            ["--raw", "ndjson", "-o", "json"],
-            ["--open"],
             ["--run", "--just-extract", "@o/r"],
             ["--run", "."],
             ["--validate", "@o/r"],
-            ["--config", "renovate.json", "."],
-            ["--config", "/no/such/file", "@o/r"],
+            ["--global-config", "/no/such/file"],
             ["/no/such/directory"],
+            [".", "--", "--dry-run=full"],
+            [".", "--", "--dry-run"],
         ):
             with self.subTest(argv=argv):
                 self.assertEqual(run(*argv, "--just-print")[0], 2)
 
+    def test_full_dry_run_is_fine_remotely(self):
+        self.assertEqual(run("@o/r", "--just-print", "--", "--dry-run=full")[0], 0)
+
     def test_remote_needs_a_token(self):
-        code, _, err = run("@o/r", "--runtime", "local")
+        code, _, err = run("@o/r")
         self.assertEqual(code, 2)
         self.assertIn("RENOVATE_TOKEN", err)
 
-    def test_just_print_needs_no_runtime(self):
+    def test_global_config_defaults_to_renovate_config_file(self):
+        with tempfile.NamedTemporaryFile(suffix=".json") as config:
+            _, out, _ = run(".", "--just-print", env={"RENOVATE_CONFIG_FILE": config.name})
+        self.assertIn(f"{config.name}:/renovate-preview/global.json:ro,z", out)
+        self.assertIn("RENOVATE_CONFIG_FILE=/renovate-preview/global.json", out)
+
+
+class JustPrintTests(unittest.TestCase):
+    def test_needs_no_engine(self):
         with mock.patch("shutil.which", return_value=None):
             code, out, _ = run(".", "--just-print", "--tag", "44.115.2")
         self.assertEqual(code, 0)
         self.assertIn("ghcr.io/renovatebot/renovate:44.115.2", out)
+
+    def test_shell(self):
+        with mock.patch("shutil.which", return_value=None):
+            _, out, _ = run(".", "--just-print", "--shell", "--name", "rp")
+        self.assertIn("\n    -it \\\n", out)
+        self.assertIn("\n    --name rp \\\n", out)
+        self.assertTrue(out.rstrip().endswith("ghcr.io/renovatebot/renovate:latest \\\n    bash"))
+
+
+class OutputTests(unittest.TestCase):
+    def test_raw_and_report(self):
+        with fake_renovate(*LINES):
+            _, raw, _ = run(".", "-o", "raw")
+            _, report, _ = run(".", "-o", "report")
+        self.assertEqual(raw.splitlines(), list(LINES))
+        self.assertEqual(report.split(), ["{", '"problems":', "[],", '"repositories":', "{}", "}"])
+
+    def test_write(self):
+        with fake_renovate(*LINES), tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "out.html")
+            _, out, _ = run(".", "-o", "html", "-w", str(path))
+            self.assertTrue(path.read_text().startswith("<!DOCTYPE html>"))
+        self.assertEqual(out, "")
+
+    def test_version_is_shown(self):
+        with fake_renovate(*LINES):
+            _, _, err = run(".")
+            _, _, silent = run(".", "--silent")
+        self.assertIn("Renovate 44.209.0 (podman, ghcr.io/renovatebot/renovate:latest)", err)
+        self.assertEqual(silent, "")
+
+    def test_missing_image(self):
+        engine_error = "Error: ghcr.io/renovatebot/renovate:latest: image not known"
+        with fake_renovate(engine_error, status=125):
+            code, out, err = run(".", "--silent")
+        self.assertEqual((code, out), (125, ""))
+        self.assertIn(f"the container did not start: {engine_error}", err)
+        self.assertIn("podman pull ghcr.io/renovatebot/renovate:latest", err)
+
+    def test_failure_points_to_the_raw_log(self):
+        with fake_renovate(*LINES, status=1):
+            code, _, err = run(".")
+        self.assertEqual(code, 1)
+        self.assertIn("-o raw", err)
+
+
+class PatUrlTests(unittest.TestCase):
+    def test_pat_url(self):
+        code, out, _ = run("--pat-url")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("https://github.com/settings/personal-access-tokens/new?"))
+        self.assertIn("&contents=write&", out)

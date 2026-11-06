@@ -8,6 +8,8 @@ along the way.
 
 from __future__ import annotations
 
+import json
+
 LEVELS = {10: "trace", 20: "debug", 30: "info", 40: "warn", 50: "error", 60: "fatal"}
 
 # What a record says about how far the run has got, for the progress hints.
@@ -19,8 +21,27 @@ PHASES = {
 }
 
 
+def parse_record(line: str) -> dict | None:
+    """A JSON log record, or None for the plain text Renovate interleaves with them."""
+    if not line.startswith("{"):
+        return None
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return record if isinstance(record, dict) else None
+
+
 def level(record: dict) -> str:
     return LEVELS.get(record.get("level"), str(record.get("level")))
+
+
+def raw_report(records: list[dict]) -> dict | None:
+    """Renovate's report, as it printed it."""
+    for record in records:
+        if record.get("msg") == "Printing report" and isinstance(record.get("report"), dict):
+            return record["report"]
+    return None
 
 
 def summarize(target: str, records: list[dict]) -> dict:
@@ -65,7 +86,6 @@ def summarize(target: str, records: list[dict]) -> dict:
         "updates": sorted(updates, key=lambda r: (r["file"], r["dependency"])),
         "branches": branches,
         "problems": problems,
-        "report_found": report is not None,
     }
 
 

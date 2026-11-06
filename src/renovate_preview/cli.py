@@ -1,51 +1,57 @@
-"""The command line."""
+"""The command line: renovate-preview's flags, and the main flow."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
-import webbrowser
 from pathlib import Path
+from urllib.parse import urlencode
 
-from . import __version__
+from . import __version__, container, renovate
+from .container import IMAGE, TAG, VOLUME, VOLUME_MOUNT, Filesystem, Progress
 from .render import html_page, table, to_json
-from .renovate import (
-    CACHE_VOLUME,
-    IMAGE,
-    TAG,
-    Target,
-    build_command,
-    build_validate_command,
-    credentials_warning,
-    detect_runtime,
-    find_config_file,
-    run,
-)
-from .report import PHASES, level, summarize
+from .renovate import Target
+from .report import parse_record, raw_report, summarize
 
 EPILOG = f"""\
 examples:
   renovate-preview                        the repository in the current directory
   renovate-preview @org/repo              a remote GitHub repository (needs RENOVATE_TOKEN)
-  renovate-preview @org/repo --config renovate.json   ... previewing a config of yours
   renovate-preview --only base --managers kustomize
-  renovate-preview -o html --open         read the result in a browser
-  renovate-preview --just-print           show the Renovate command, run nothing
+  renovate-preview -o html -w report.html read the result in a browser
+  renovate-preview --just-print           show the container command, run nothing
+  renovate-preview --shell                a shell in the container, set up as for Renovate
   renovate-preview -- --ignore-paths='overlays/**'   pass arguments on to Renovate
 
 environment:
   RENOVATE_TOKEN          GitHub token: needed for @org/repo, and lifts the rate limit on
                           version lookups (RENOVATE_GITHUB_COM_TOKEN does that alone).
-  RENOVATE_CONFIG_FILE    your self-hosted (global) config, if you have one.
+                          renovate-preview --pat-url links to a pre-filled token form.
+  RENOVATE_CONFIG_FILE    default for --global-config.
   RENOVATE_PLATFORM       with RENOVATE_ENDPOINT, for @org/repo outside github.com.
   RENOVATE_*              forwarded to Renovate, like GITHUB_COM_TOKEN.
   RENOVATE_PREVIEW_RUNTIME  default for --runtime.
 
-Renovate's cache is kept in the {CACHE_VOLUME} container volume between runs.
+Renovate's working directory, {VOLUME_MOUNT}, is the {VOLUME} volume: its caches
+survive between runs.
 """
+
+# The permissions Renovate documents for a fine-grained token, minus the organization-only
+# Members, which the form refuses for a personal account (and a dry run doesn't need):
+# https://docs.renovatebot.com/modules/platform/github/#permissions
+# The URL parameters: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
+PAT_PERMISSIONS = {
+    "contents": "write",
+    "issues": "write",
+    "pull_requests": "write",
+    "statuses": "write",
+    "vulnerability_alerts": "read",
+    "workflows": "write",
+}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -78,36 +84,46 @@ def parser() -> argparse.ArgumentParser:
     )
     what.add_argument("--managers", metavar="LIST", help="comma-separated managers to enable")
     what.add_argument(
-        "--config",
+        "--global-config",
         metavar="FILE",
-        help="with @org/repo, use this repository config instead of the repository's own",
+        default=os.environ.get("RENOVATE_CONFIG_FILE"),
+        help="a self-hosted (global) Renovate config (default: $RENOVATE_CONFIG_FILE)",
     )
 
     out = p.add_argument_group("output")
-    out.add_argument("-o", "--output", choices=("table", "json", "html"), default="table")
-    out.add_argument("--open", action="store_true", help="with -o html, open it in a browser")
     out.add_argument(
-        "--raw",
-        choices=("ndjson", "report"),
-        help="Renovate's own output instead: its whole log, or just its report object",
+        "-o",
+        "--output",
+        choices=("table", "json", "html", "raw", "report"),
+        default="table",
+        help="table (default), json, html; or Renovate's own: raw (its whole log), report",
     )
+    out.add_argument("-w", "--write", metavar="FILE", help="write the output to FILE")
     out.add_argument(
         "-v", "--verbose", action="store_true", help="show what Renovate is doing as it runs"
     )
     out.add_argument("--silent", action="store_true", help="no progress, hints or warnings")
     out.add_argument(
-        "--just-print", action="store_true", help="print the Renovate command and exit"
+        "--just-print", action="store_true", help="print the container command and exit"
     )
 
-    rt = p.add_argument_group("runtime")
-    rt.add_argument(
+    ctr = p.add_argument_group("container")
+    ctr.add_argument(
         "--runtime",
-        choices=("auto", "podman", "docker", "local"),
+        choices=("auto", "podman", "docker"),
         default=os.environ.get("RENOVATE_PREVIEW_RUNTIME", "auto"),
-        help="'auto' (default) picks podman, then docker; 'local' uses renovate from $PATH",
+        help="'auto' (default) picks podman, then docker",
     )
-    rt.add_argument("--image", default=IMAGE, help=f"container image (default: {IMAGE})")
-    rt.add_argument("--tag", default=TAG, help=f"image tag (default: {TAG})")
+    ctr.add_argument("--image", default=IMAGE, help=f"container image (default: {IMAGE})")
+    ctr.add_argument("--tag", default=TAG, help=f"image tag (default: {TAG})")
+    ctr.add_argument("--name", help="container name")
+    ctr.add_argument(
+        "--shell", action="store_true", help="a shell in the container, instead of Renovate"
+    )
+
+    p.add_argument(
+        "--pat-url", action="store_true", help="print a link to create a GitHub token, and exit"
+    )
     return p
 
 
@@ -132,148 +148,167 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def preview(opts: argparse.Namespace) -> int:
+    if opts.pat_url:
+        print(pat_url())
+        return 0
     target = Target.parse(opts.repository)
-
-    def warn(message: str) -> None:
-        if not opts.silent:
-            print(f"renovate-preview: {message}", file=sys.stderr, flush=True)
-
+    warn = warner(opts)
     if error := check(opts, target):
         print(f"renovate-preview: error: {error}", file=sys.stderr)
         return 2
 
-    runtime = detect_runtime(opts.runtime)
-    if runtime is None:
+    engine = container.detect_engine(opts.runtime)
+    if engine is None:
         if not opts.just_print:
-            print(f"renovate-preview: error: {runtime_missing(opts.runtime)}", file=sys.stderr)
+            print(f"renovate-preview: error: {engine_missing(opts.runtime)}", file=sys.stderr)
             return 2
-        runtime = "podman" if opts.runtime == "auto" else opts.runtime
-    opts.image = f"{opts.image}:{opts.tag}"
+        engine = "podman" if opts.runtime == "auto" else opts.runtime
+    image = f"{opts.image}:{opts.tag}"
 
     if opts.validate:
-        return validate(opts, target, runtime)
+        return validate(opts, target, engine, image)
 
-    if target.remote and not opts.config and find_config_file("."):
-        warn(
-            f"using the config of {target.value}; add --config {find_config_file('.')} "
-            "to preview yours instead"
-        )
+    fs = container.filesystem(target, opts.global_config)
+    env = renovate.environment(fs.global_config)
+    args = renovate.arguments(opts, target)
 
-    command = build_command(opts, target, runtime)
+    if opts.shell:
+        argv = container.command(engine, image, fs, env, [], "bash", opts.name, interactive=True)
+        if opts.just_print:
+            return print_command(argv)
+        warn(f"Renovate would run as: renovate {shlex.join(args)}")
+        return subprocess.run(argv, check=False).returncode
+
+    argv = container.command(engine, image, fs, env, args, name=opts.name)
     if opts.just_print:
-        print(command.printable())
-        return 0
+        return print_command(argv)
 
-    if message := credentials_warning(opts.just_extract):
+    if message := renovate.credentials_warning(opts.just_extract):
         warn(message)
     if opts.run:
         warn(f"this is a REAL run against {target.value}: it can create branches and PRs")
     if opts.verbose:
-        print(command.printable(), file=sys.stderr)
+        print(container.printable(argv), file=sys.stderr)
 
-    records: list[dict] = []
+    status, lines = container.run(argv, Progress(warn, opts.verbose, f"{engine}, {image}"))
+    records = [r for r in map(parse_record, lines) if r is not None]
+    if status != 0 and not records:
+        # Not even Renovate's first log record: the engine itself failed.
+        print(
+            f"renovate-preview: error: the container did not start: {last_line(lines)}\n"
+            f"If the image is missing: {engine} pull {image}",
+            file=sys.stderr,
+        )
+        return status
 
-    def on_line(line: str, record: dict | None) -> None:
-        if opts.raw == "ndjson":
-            print(line, flush=True)
-        if record is None:
-            return
-        records.append(record)
-        if opts.verbose:
-            print(f"{level(record).upper():<5} {record.get('msg')}", file=sys.stderr)
-        elif record.get("msg") in PHASES:
-            warn(f"{PHASES[record['msg']]}...")
-
-    status = run(command, on_line)
     document = summarize(opts.repository or target.value, records)
-
-    if opts.raw == "report":
-        report = next((r["report"] for r in records if r.get("msg") == "Printing report"), None)
-        print(json.dumps(report, indent=2))
-    elif not opts.raw:
-        output(document, opts)
-
+    write(render(opts.output, document, lines, records), opts.write)
     if document["problems"] and not opts.verbose:
         warn("Renovate reported:\n  " + "\n  ".join(document["problems"][:10]))
     if status != 0:
         print(
             f"renovate-preview: renovate exited with status {status}; "
-            "see its whole log with --raw ndjson",
+            "see its whole log with -o raw",
             file=sys.stderr,
         )
     return status
+
+
+def last_line(lines: list[str]) -> str:
+    return next((line for line in reversed(lines) if line.strip()), "no output")
+
+
+def warner(opts):
+    """Progress, hints and warnings on stderr, unless --silent."""
+
+    def warn(message: str) -> None:
+        if not opts.silent:
+            print(f"renovate-preview: {message}", file=sys.stderr, flush=True)
+
+    return warn
 
 
 def check(opts, target: Target) -> str | None:
     """Reject what cannot work, before anything is run."""
     if opts.silent and opts.verbose:
         return "--silent and --verbose contradict each other"
-    if opts.raw and opts.output != "table":
-        return "--raw and -o are two different outputs; pick one"
-    if opts.open and opts.output != "html":
-        return "--open goes with -o html"
     if opts.run and opts.just_extract:
         return "--run and --just-extract contradict each other"
     if not target.remote and not Path(target.value).is_dir():
         return f"no such directory: {target.value}"
     if opts.run and not target.remote:
         return "--run needs a remote repository (@org/repo): a local one has nowhere to push"
-    if opts.validate and target.remote and not opts.config:
-        return "--validate needs a local repository, or --config"
-    for name in (opts.config, os.environ.get("RENOVATE_CONFIG_FILE")):
-        if name and not Path(name).is_file():
-            return f"no such config file: {name}"
-    if opts.config and not target.remote and not opts.validate:
+    if opts.validate and target.remote:
+        return "--validate checks the config of a local repository"
+    if opts.global_config and not Path(opts.global_config).is_file():
+        return f"no such config file: {opts.global_config}"
+    if not target.remote and renovate.passthrough_value(opts.passthrough, "--dry-run") in (
+        "",
+        "full",
+    ):
         return (
-            "--config goes with @org/repo. For a local repository, edit its renovate.json: "
-            "Renovate's local platform always reads it."
+            "the local platform can't do a full dry run (Renovate turns it into 'lookup'). "
+            "For PR titles, preview the remote repository: renovate-preview @org/repo"
         )
     if target.remote and not opts.just_print and not os.environ.get("RENOVATE_TOKEN"):
-        return "RENOVATE_TOKEN must be set to reach a remote repository"
+        return "RENOVATE_TOKEN must be set to reach a remote repository (see --pat-url)"
     return None
 
 
-def runtime_missing(choice: str) -> str:
-    if choice == "local":
-        return "no 'renovate' on PATH (npm install -g renovate)"
+def engine_missing(choice: str) -> str:
     if choice == "auto":
-        return "neither podman nor docker found (or use --runtime=local with a local renovate)"
+        return "neither podman nor docker found"
     return f"{choice} not found on PATH"
 
 
-def validate(opts, target: Target, runtime: str) -> int:
-    config = Path(opts.config) if opts.config else find_config_file(target.value)
+def validate(opts, target: Target, engine: str, image: str) -> int:
+    config = renovate.find_config_file(target.value)
     if config is None:
         print(f"renovate-preview: error: no Renovate config in {target.value}", file=sys.stderr)
         return 2
-    command = build_validate_command(opts, runtime, config)
+    inside = f"{container.CONFIG_MOUNT}/{config.name}"
+    fs = Filesystem(mounts=[(str(config.resolve()), inside)])
+    env = {"NODE_OPTIONS": "--no-deprecation", "LOG_LEVEL": "info"}
+    argv = container.command(
+        engine, image, fs, env, ["--no-global", inside], "renovate-config-validator", opts.name
+    )
     if opts.just_print:
-        print(command.printable())
-        return 0
-    env = {**os.environ, **command.env} if command.env else None
-    return subprocess.run(command.argv, cwd=command.cwd, env=env, check=False).returncode
+        return print_command(argv)
+    return subprocess.run(argv, check=False).returncode
 
 
-def output(document: dict, opts) -> None:
-    if opts.output == "table":
-        print(table(document))
-    elif opts.output == "json":
-        print(to_json(document))
-    elif sys.stdout.isatty() or opts.open:
-        # A page is no use in a terminal: write it to a file, and say where.
-        path = cache_dir() / "report.html"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(html_page(document), encoding="utf-8")
-        print(path.as_uri())
-        if opts.open:
-            webbrowser.open(path.as_uri())
+def print_command(argv: list[str]) -> int:
+    print(container.printable(argv))
+    return 0
+
+
+def render(output: str, document: dict, lines: list[str], records: list[dict]) -> str:
+    if output == "raw":
+        return "\n".join(lines)
+    if output == "report":
+        return json.dumps(raw_report(records), indent=2)
+    if output == "json":
+        return to_json(document)
+    if output == "html":
+        return html_page(document)
+    return table(document)
+
+
+def write(text: str, path: str | None) -> None:
+    if path:
+        Path(path).write_text(text + "\n", encoding="utf-8")
     else:
-        print(html_page(document))
+        print(text)
 
 
-def cache_dir() -> Path:
-    base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
-    return Path(base) / "renovate-preview"
+def pat_url() -> str:
+    query = {
+        "name": "renovate-preview",
+        "description": "Renovate, run by renovate-preview. Permissions from "
+        "https://docs.renovatebot.com/modules/platform/github/#permissions",
+        **PAT_PERMISSIONS,
+    }
+    return f"https://github.com/settings/personal-access-tokens/new?{urlencode(query)}"
 
 
 if __name__ == "__main__":

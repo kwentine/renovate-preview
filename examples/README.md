@@ -26,7 +26,6 @@ against its `expected.json`.
 | [`custom-manager-regex`](./custom-manager-regex/) | `customManagers` of `customType: regex`, in both the `depNameTemplate` and captured-`depName` flavours |
 | [`custom-manager-jsonata`](./custom-manager-jsonata/) | `customManagers` of `customType: jsonata` with `fileFormat: yaml` |
 | [`preset-extends`](./preset-extends/) | `extends: ["config:best-practices"]`, and the `ignorePaths` it brings with it |
-| [`pr-title`](./pr-title/) | `semanticCommits` and the `commitMessageTopic` Handlebars template |
 | [`separate-multiple-minor`](./separate-multiple-minor/) | `separateMultipleMinor`, and negated `matchPackageNames` |
 
 ## Adding one

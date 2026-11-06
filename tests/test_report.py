@@ -1,8 +1,7 @@
 import unittest
 from pathlib import Path
 
-from renovate_preview.renovate import parse_record
-from renovate_preview.report import dependency_rows, summarize
+from renovate_preview.report import dependency_rows, parse_record, summarize
 
 LOOKUP = Path(__file__).parent / "data" / "lookup.ndjson"
 # A real run with minimumReleaseAge (Renovate 44.164.10, October 2026).
@@ -34,7 +33,6 @@ class SummarizeTests(unittest.TestCase):
     def test_no_report(self):
         document = summarize("x", [])
         self.assertEqual(document["updates"], [])
-        self.assertFalse(document["report_found"])
 
     def test_pr_titles_come_from_branches(self):
         report = {

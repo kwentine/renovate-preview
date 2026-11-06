@@ -1,0 +1,4 @@
+{
+  "ignorePaths": ["a/**"],
+  "packageRules": [{ "matchPackageNames": ["*"], "groupName": "demo group" }]
+}

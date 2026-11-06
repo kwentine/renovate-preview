@@ -3,14 +3,13 @@
 #   make install     put renovate-preview on your PATH, running from this checkout
 #   make uninstall   take it off again
 #   make test        unit tests (never run Renovate)
-#   make examples    check examples/ against a real Renovate (RUNTIME=local to skip containers)
+#   make examples    check examples/ against a real Renovate, in podman or docker
 #   make lint        ruff
 #   make build       wheel and sdist, for PyPI
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 PYTHON ?= python3
-RUNTIME ?= auto
 
 SRC    := $(abspath src)
 TARGET := $(BINDIR)/renovate-preview
@@ -35,8 +34,7 @@ test:
 	$(PYTHON) -m unittest discover -s tests -t . -q
 
 examples:
-	RENOVATE_PREVIEW_E2E=1 RENOVATE_PREVIEW_RUNTIME=$(RUNTIME) \
-	  $(PYTHON) -m unittest tests.test_examples -v
+	RENOVATE_PREVIEW_E2E=1 $(PYTHON) -m unittest tests.test_examples -v
 
 lint:
 	ruff check src tests && ruff format --check src tests

@@ -20,8 +20,14 @@ uv tool install renovate-preview   # or, from a checkout: uv tool install .
 make install                       # or: a launcher in ~/.local/bin running this checkout
 #+end_src
 
-Renovate runs in a container: =podman= or =docker=, whichever is installed. With
-=--runtime=local=, it uses a =renovate= on your =PATH= instead (=npm install -g renovate=).
+Renovate runs in a container: =podman= or =docker=, whichever is installed. renovate-preview
+never pulls the image: pull it first, and again whenever you want a newer Renovate.
+
+#+begin_src sh
+podman pull ghcr.io/renovatebot/renovate   # or: docker pull ...
+#+end_src
+
+Each run prints the Renovate version it uses.
 
 * Usage
 
@@ -29,7 +35,7 @@ Renovate runs in a container: =podman= or =docker=, whichever is installed. With
 renovate-preview                           # the repository in the current directory
 renovate-preview path/to/repo              # another one
 renovate-preview @org/repo                 # a GitHub repository (needs RENOVATE_TOKEN)
-renovate-preview @org/repo --config renovate.json   # ... with your config instead of its own
+renovate-preview --pat-url                 # a link to create that token, pre-filled
 
 renovate-preview --just-extract            # only the dependencies found: fast, offline
 renovate-preview --validate                # only validate the config
@@ -39,49 +45,50 @@ renovate-preview --only base               # limit to some paths...
 renovate-preview --except 'overlays/**'    # ... or skip some
 renovate-preview --managers kubernetes     # limit to some managers
 
-renovate-preview -o json                   # table (default), json or html
-renovate-preview -o html --open            # a page to read in a browser
-renovate-preview --raw ndjson              # Renovate's own log, or its report: --raw report
+renovate-preview -o json                   # table (default), json, html
+renovate-preview -o html -w report.html    # ... written to a file rather than stdout
+renovate-preview -o raw                    # Renovate's own log; or its report: -o report
 renovate-preview --verbose                 # what Renovate is doing, as it runs
 renovate-preview --silent                  # no progress hints or warnings
 
+renovate-preview --global-config config.js # a self-hosted (global) config
 renovate-preview --tag 44.115.2            # a given Renovate version
-renovate-preview --just-print              # the Renovate command, without running it
+renovate-preview --just-print              # the container command, without running it
+renovate-preview --shell                   # a shell in that container, instead of Renovate
 renovate-preview -- --ignore-paths='a/**'  # pass arguments on to Renovate
 #+end_src
 
-=-o html= prints the page when piped, and otherwise writes it to
-=~/.cache/renovate-preview/report.html=.
+Arguments after =--= win: over the repository config (renovate-preview adds
+=--force-cli=true=), and over renovate-preview's own (=--only= is dropped if you pass
+=--include-paths=).
 
 * Environment
 
 | =RENOVATE_TOKEN=                                | GitHub token. Required for =@org/repo=.                          |
 | =RENOVATE_GITHUB_COM_TOKEN=, =GITHUB_COM_TOKEN= | Authenticates version lookups on github.com, avoiding rate limits. |
-| =RENOVATE_CONFIG_FILE=                          | Your self-hosted (global) config, if you have one.               |
+| =RENOVATE_CONFIG_FILE=                          | Default for =--global-config=.                                   |
 | =RENOVATE_PLATFORM=, =RENOVATE_ENDPOINT=        | For =@org/repo= elsewhere than github.com: GitLab, Forgejo...    |
 | =RENOVATE_*=                                    | Forwarded to Renovate, like the ones above.                      |
-| =RENOVATE_PREVIEW_RUNTIME=                      | Default for =--runtime=: =auto=, =podman=, =docker= or =local=.  |
+| =RENOVATE_PREVIEW_RUNTIME=                      | Default for =--runtime=: =auto=, =podman= or =docker=.           |
 
-Renovate's cache lives in the =renovate-preview-cache= container volume between runs.
-=podman volume rm renovate-preview-cache= resets it.
+Renovate's working directory, =/tmp/renovate= (its caches), lives in the =renovate-preview=
+container volume between runs. =podman volume rm renovate-preview= resets it.
 
 * Configuration
 
-A local repository is previewed with its own =renovate.json=: edit it, and re-run.
+A repository is previewed with its own =renovate.json=. To try a change, edit it and
+re-run; for a remote repository, clone it first.
 
-For a remote repository, =--config FILE= replaces the repository's config entirely, as if it
-had none. This lets you check a config change against the real repository before pushing
-it, with PR titles, because the dry run on a remote repository is complete.
-
-=RENOVATE_CONFIG_FILE= adds a self-hosted (global) config. The repository config (or
-yours) wins over it, and command-line flags win over both.
+=--global-config= adds a self-hosted (global) config. The repository config wins over it,
+and command-line flags win over both.
 [[file:docs/configuration.org][=docs/configuration.org=]] walks through the combinations.
 
 * Good to know
 
 - *No PR titles for a local repository.* Renovate's local platform stops after version
-  lookups (=--dry-run=full= is silently downgraded to =lookup=), so branch names are known
-  but PR titles are not. Against =@org/repo= the dry run is complete.
+  lookups (it silently turns =--dry-run=full= into =lookup=, so renovate-preview refuses
+  it), so branch names are known but PR titles are not. Against =@org/repo= the dry run
+  is complete.
 - *AGE and PENDING come from =minimumReleaseAge=.* AGE is the new version's age, empty when
   the registry gives no release date (many container registries don't). Renovate then
   can't check =minimumReleaseAge=, and by default holds the update back. PENDING is =yes=
@@ -107,10 +114,10 @@ needs, and answers one question: which dependencies were found, and which update
 available. When that answer is surprising, the log explains why:
 
 #+begin_src sh
-renovate-preview --raw ndjson > run.log            # the same run, as Renovate's own log
+renovate-preview -o raw -w run.log                 # the same run, as Renovate's own log
 renovate-pretty-log-tui -path run.log              # ... explored
 renovate-pretty-log -path run.log -level warn      # ... or just its problems
-renovate-preview --raw ndjson | renovate-pretty-log -path /dev/stdin
+renovate-preview -o raw | renovate-pretty-log -path /dev/stdin
 #+end_src
 
 * Examples
@@ -125,7 +132,9 @@ renovate-preview examples/custom-manager-regex
 
 #+begin_src sh
 make test       # unit tests
-make examples   # check examples/ against a real Renovate (RUNTIME=local to skip containers)
+make examples   # check examples/ against a real Renovate, in podman or docker
 make lint
 make build
 #+end_src
+
+[[file:docs/architecture.org][=docs/architecture.org=]]: how the code is organised.

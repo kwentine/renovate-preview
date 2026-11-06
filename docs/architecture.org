@@ -1,0 +1,63 @@
+#+TITLE: How renovate-preview is organised
+#+OPTIONS: toc:nil num:nil
+
+One run goes through five steps, one module each (=src/renovate_preview/=):
+
+#+begin_example
+ cli.py           flags, checks, and the flow below
+   │
+   ├─ renovate.py   1. Renovate's arguments and environment, from renovate-preview's flags
+   ├─ container.py  2. the container's filesystem: mounts and the volume
+   │                3. podman/docker: run, progress on stderr
+   ├─ report.py     4. Renovate's JSON log → a summary document
+   └─ render.py     5. the summary → table, json or html
+#+end_example
+
+* 1. Renovate's command line and environment (=renovate.py=)
+
+=arguments()= translates the flags: =--just-extract= → =--dry-run=extract=, =--only= →
+=--include-paths=, and so on. Arguments after =--= come last, with =--force-cli=true= so
+they win over the repository config; a flag of ours that you also pass is dropped.
+=environment()= sets what a preview needs: a JSON debug log (=LOG_FORMAT=json=), a config
+that may be missing (=RENOVATE_REQUIRE_CONFIG=optional=), the repository cache. Your own
+=RENOVATE_*= variables are forwarded to the container by name, so no token value shows
+in the command line.
+
+* 2. The container's filesystem (=container.py=: =filesystem()=)
+
+| inside               | what                                     | how                   |
+|----------------------+------------------------------------------+-----------------------|
+| =/usr/src/app=       | the local repository; the working dir    | bind mount, =ro,z=    |
+| =/renovate-preview/= | the global config file (=global.<ext>=)  | bind mount, =ro,z=    |
+| =/tmp/renovate=      | Renovate's =baseDir=: caches, clones     | volume =renovate-preview= |
+
+=:z= gives a /shared/ SELinux label, so several containers can mount the same path at
+once. The repository's files belong to a uid the container doesn't know, so git would
+refuse it as "dubious ownership": =GIT_CONFIG_*= variables declare it a =safe.directory=.
+
+* 3. Running it (=container.py=: =command()=, =run()=, =Progress=)
+
+=command()= builds =podman run= (or =docker run=), with =--pull=never=: the image must be
+there, and pulling it is up to you. If the container doesn't start, the engine's error is
+shown with the pull command. =--shell= runs =bash= in the same container instead of
+Renovate.
+
+=run()= streams the output. =Progress= shows the Renovate version and each phase, on
+stderr; =--verbose= shows every log record instead.
+
+* 4. Parsing (=report.py=)
+
+With =--report-type=logging=, Renovate logs a "Printing report" record holding the package
+files, their dependencies and updates, and the branches. =summarize()= turns it into one
+row per dependency or update. Warnings and errors come from the log records.
+
+* 5. Rendering (=render.py=)
+
+=table=, =json= and =html= render the summary. =-o raw= (the log) and =-o report=
+(Renovate's report object) skip steps 4 and 5. =-w FILE= writes to a file instead of
+stdout.
+
+* Tests
+
+=make test= runs the unit tests: no Renovate, no container. =tests/data/= holds trimmed logs
+of real runs. =make examples= runs each of =examples/= through a real container.

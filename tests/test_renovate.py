@@ -7,18 +7,19 @@ from unittest import mock
 from renovate_preview.cli import parse_args
 from renovate_preview.renovate import (
     Target,
-    build_command,
-    build_validate_command,
+    arguments,
+    environment,
+    forwarded_environment,
     ignore_paths,
     include_paths,
+    passthrough_value,
 )
 
 
-def command(*argv, runtime="podman", env=None):
+def args(*argv, env=None):
     opts = parse_args(list(argv))
-    opts.image = "img:tag"
     with mock.patch.dict(os.environ, env or {}, clear=True):
-        return build_command(opts, Target.parse(opts.repository), runtime)
+        return arguments(opts, Target.parse(opts.repository))
 
 
 class TargetTests(unittest.TestCase):
@@ -47,89 +48,68 @@ class PathFilterTests(unittest.TestCase):
             self.assertIn("x", ignore_paths("x", Target(False, tmp)))
 
 
-class CommandTests(unittest.TestCase):
-    def test_container_mounts_the_repository_read_only(self):
-        argv = command("/tmp").argv
-        self.assertEqual(argv[:3], ["podman", "run", "--rm"])
-        self.assertIn("/tmp:/usr/src/app:ro,z", argv)
-        self.assertIn("img:tag", argv)
-        self.assertEqual(argv[-2:], ["--platform", "local"])
-
-    def test_scope(self):
-        self.assertIn("--dry-run=lookup", command("/tmp").argv)
-        self.assertIn("--dry-run=full", command("@o/r").argv)
-        self.assertIn("--dry-run=extract", command("--just-extract", "/tmp").argv)
-        self.assertFalse([a for a in command("--run", "@o/r").argv if "dry-run" in a])
-
-    def test_remote_is_not_mounted(self):
-        argv = command("@org/repo").argv
-        self.assertEqual(argv[-3:], ["--platform", "github", "org/repo"])
-        self.assertFalse([a for a in argv if "/usr/src/app" in a])
-
-    def test_passthrough_goes_before_the_platform(self):
-        argv = command("/tmp", "--", "--ignore-paths=x").argv
-        self.assertEqual(argv[-3:], ["--ignore-paths=x", "--platform", "local"])
-
-    def test_credentials_are_forwarded_by_name_only(self):
-        argv = command("/tmp", env={"RENOVATE_TOKEN": "secret", "RENOVATE_PREVIEW_RUNTIME": "x"})
-        self.assertIn("RENOVATE_TOKEN", argv.argv)
-        self.assertFalse([a for a in argv.argv if "secret" in a or "PREVIEW" in a])
-
-    def test_local_runtime_runs_in_the_repository(self):
-        cmd = command("/tmp", runtime="local")
-        self.assertEqual(cmd.argv[0], "renovate")
-        self.assertEqual(cmd.cwd, "/tmp")
-        self.assertEqual(cmd.env["LOG_FORMAT"], "json")
-        self.assertNotIn("GIT_CONFIG_COUNT", cmd.env)
-
-    def test_printable_keeps_flags_with_their_values(self):
-        text = command("/tmp", "--managers", "kustomize").printable()
-        self.assertTrue(text.startswith("podman run --rm \\\n"))
-        self.assertIn("\n    --enabled-managers kustomize \\\n", text)
-        self.assertIn("\n    -e LOG_LEVEL=debug \\\n", text)
-
-    def test_printable_local_command(self):
-        text = command("/tmp", runtime="local").printable()
-        self.assertTrue(text.startswith("cd /tmp && \\\n  NODE_OPTIONS=--no-deprecation"))
-
-    def test_validate(self):
-        opts = parse_args(["/tmp"])
-        opts.image = "img:tag"
-        config = Path("/tmp/renovate.json")
-        cmd = build_validate_command(opts, "local", config)
-        self.assertEqual(cmd.argv, ["renovate-config-validator", "--no-global", str(config)])
-        argv = build_validate_command(opts, "podman", config).argv
-        self.assertIn("/tmp/renovate.json:/renovate-preview/renovate.json:ro,z", argv)
-        self.assertEqual(argv[-2:], ["--no-global", "/renovate-preview/renovate.json"])
-
-
-class ConfigTests(unittest.TestCase):
-    """--config shadows the remote repository's config; RENOVATE_CONFIG_FILE is global config."""
-
-    def test_config_shadows_the_repository_config(self):
-        with tempfile.NamedTemporaryFile(suffix=".json5") as config:
-            argv = command("@o/r", "--config", config.name).argv
-            self.assertIn(f"{config.name}:/renovate-preview/config.json5:ro,z", argv)
-        self.assertIn("RENOVATE_ADDITIONAL_CONFIG_FILE=/renovate-preview/config.json5", argv)
-        self.assertIn("RENOVATE_REQUIRE_CONFIG=ignored", argv)
-        self.assertIn("RENOVATE_DELETE_ADDITIONAL_CONFIG_FILE=false", argv)
-
-    def test_repository_config_is_read_without_config(self):
-        self.assertIn("RENOVATE_REQUIRE_CONFIG=optional", command("@o/r").argv)
-
-    def test_global_config_is_mounted(self):
-        with tempfile.NamedTemporaryFile(suffix=".json") as config:
-            argv = command("/tmp", env={"RENOVATE_CONFIG_FILE": config.name}).argv
-            self.assertIn(f"{config.name}:/renovate-preview/global.json:ro,z", argv)
-        self.assertIn("RENOVATE_CONFIG_FILE=/renovate-preview/global.json", argv)
-        self.assertNotIn("RENOVATE_CONFIG_FILE", argv)  # not also forwarded as-is
-
-    def test_local_runtime_gets_absolute_paths(self):
-        cmd = command("@o/r", "--config", "renovate.json", runtime="local")
+class ArgumentTests(unittest.TestCase):
+    def test_local(self):
         self.assertEqual(
-            cmd.env["RENOVATE_ADDITIONAL_CONFIG_FILE"], str(Path.cwd() / "renovate.json")
+            args("/tmp"), ["--report-type=logging", "--dry-run=lookup", "--platform=local"]
         )
 
-    def test_other_platforms(self):
-        argv = command("@o/r", env={"RENOVATE_PLATFORM": "gitlab"}).argv
-        self.assertEqual(argv[-3:], ["--platform", "gitlab", "o/r"])
+    def test_scope(self):
+        self.assertIn("--dry-run=full", args("@o/r"))
+        self.assertIn("--dry-run=extract", args("--just-extract", "/tmp"))
+        self.assertFalse([a for a in args("--run", "@o/r") if "dry-run" in a])
+
+    def test_remote(self):
+        self.assertEqual(args("@org/repo")[-2:], ["--platform=github", "org/repo"])
+        other = args("@o/r", env={"RENOVATE_PLATFORM": "gitlab"})
+        self.assertEqual(other[-2:], ["--platform=gitlab", "o/r"])
+
+    def test_filters(self):
+        argv = args("/tmp", "--only", "base", "--managers", "kustomize")
+        self.assertIn("--include-paths=base,base/**", argv)
+        self.assertIn("--enabled-managers=kustomize", argv)
+
+
+class PassthroughTests(unittest.TestCase):
+    """Arguments after `--` win: over ours, and (with --force-cli) over the repo config."""
+
+    def test_passthrough_comes_after_ours_with_force_cli(self):
+        self.assertEqual(
+            args("/tmp", "--", "--ignore-paths=x"),
+            [
+                "--report-type=logging",
+                "--dry-run=lookup",
+                "--force-cli=true",
+                "--platform=local",
+                "--ignore-paths=x",
+            ],
+        )
+
+    def test_no_force_cli_without_passthrough(self):
+        self.assertNotIn("--force-cli=true", args("/tmp"))
+
+    def test_ours_are_dropped_when_given_again(self):
+        argv = args("/tmp", "--only", "base", "--", "--include-paths", "x", "--dry-run=extract")
+        self.assertFalse([a for a in argv if a.startswith("--include-paths=")])
+        self.assertNotIn("--dry-run=lookup", argv)
+        self.assertEqual(argv[-3:], ["--include-paths", "x", "--dry-run=extract"])
+
+    def test_remote_repository_stays_last(self):
+        self.assertEqual(args("@o/r", "--", "--foo")[-2:], ["--foo", "o/r"])
+
+    def test_passthrough_value(self):
+        self.assertEqual(passthrough_value(["--dry-run=full"], "--dry-run"), "full")
+        self.assertEqual(passthrough_value(["--dry-run", "full"], "--dry-run"), "full")
+        self.assertEqual(passthrough_value(["--dry-run", "--x"], "--dry-run"), "")
+        self.assertIsNone(passthrough_value(["--dry-runs=1"], "--dry-run"))
+
+
+class EnvironmentTests(unittest.TestCase):
+    def test_global_config(self):
+        self.assertNotIn("RENOVATE_CONFIG_FILE", environment(None))
+        self.assertEqual(environment("/g.json")["RENOVATE_CONFIG_FILE"], "/g.json")
+
+    def test_forwarded_by_name(self):
+        env = {"RENOVATE_TOKEN": "x", "GITHUB_COM_TOKEN": "y", "RENOVATE_PREVIEW_RUNTIME": "z"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(forwarded_environment(), ["GITHUB_COM_TOKEN", "RENOVATE_TOKEN"])

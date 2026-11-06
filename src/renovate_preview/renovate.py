@@ -1,24 +1,12 @@
-"""Building the Renovate command line, and running it."""
+"""Renovate's side: renovate-preview's options translated into Renovate's arguments and
+environment."""
 
 from __future__ import annotations
 
 import json
 import os
-import shlex
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-
-IMAGE = "ghcr.io/renovatebot/renovate"
-TAG = "latest"
-CACHE_VOLUME = "renovate-preview-cache"
-CACHE_MOUNT = "/tmp/renovate/cache"
-# The image's WORKDIR: `--platform local` examines the current directory.
-REPO_MOUNT = "/usr/src/app"
-# Where config files are mounted in the container.
-CONFIG_MOUNT = "/renovate-preview"
-ENGINES = ("podman", "docker")
 
 # Config file names Renovate looks for, in its own order of preference.
 CONFIG_FILE_NAMES = (
@@ -38,7 +26,7 @@ LOOKUP_TOKENS = ("RENOVATE_TOKEN", "RENOVATE_GITHUB_COM_TOKEN", "GITHUB_COM_TOKE
 
 @dataclass
 class Target:
-    """What Renovate runs against: a local directory, or a remote GitHub repository."""
+    """What Renovate runs against: a local directory, or a remote repository."""
 
     remote: bool
     value: str  # absolute directory, or org/repo
@@ -50,39 +38,74 @@ class Target:
         return cls(False, str(Path(repository or ".").resolve()))
 
 
-@dataclass
-class Command:
-    argv: list[str]
-    env: dict[str, str]  # only for a local renovate; a container gets it through -e
-    cwd: str | None
-    head: int = 1  # words kept together on the first line, like `podman run --rm`
+def arguments(opts, target: Target) -> list[str]:
+    """Renovate's command line. Arguments passed after `--` win over ours: we drop a flag of
+    ours that they also give, and --force-cli makes them win over the repository config."""
+    ours = {"--report-type": "logging"}
+    if opts.just_extract:
+        ours["--dry-run"] = "extract"
+    elif not opts.run:
+        # The local platform can't do 'full': it would silently downgrade to 'lookup'.
+        ours["--dry-run"] = "full" if target.remote else "lookup"
+    if opts.managers:
+        ours["--enabled-managers"] = opts.managers
+    if opts.only:
+        ours["--include-paths"] = ",".join(include_paths(opts.only))
+    if opts.excluded:
+        ours["--ignore-paths"] = ",".join(ignore_paths(opts.excluded, target))
+    if opts.passthrough:
+        # Renovate's default, but a global config could turn it off.
+        ours["--force-cli"] = "true"
+    # RENOVATE_PLATFORM (with RENOVATE_ENDPOINT) reaches GitLab, Forgejo...
+    remote_platform = os.environ.get("RENOVATE_PLATFORM", "github")
+    ours["--platform"] = remote_platform if target.remote else "local"
 
-    def printable(self) -> str:
-        """The command as something to paste, one option per line."""
-        lines = [f"{k}={shlex.quote(v)}" for k, v in self.env.items()]
-        lines.append(shlex.join(self.argv[: self.head]))
-        takes_value = False
-        for word in self.argv[self.head :]:
-            quoted = shlex.quote(word)
-            if word.startswith("-"):
-                lines.append(quoted)
-                takes_value = "=" not in word
-            elif takes_value:
-                lines[-1] += f" {quoted}"
-                takes_value = False
-            else:
-                lines.append(quoted)
-        text = " \\\n    ".join(lines)
-        return f"cd {shlex.quote(self.cwd)} && \\\n  {text}" if self.cwd else text
+    theirs = {flag(arg) for arg in opts.passthrough}
+    args = [f"{name}={value}" for name, value in ours.items() if name not in theirs]
+    args += opts.passthrough
+    return [*args, target.value] if target.remote else args
 
 
-def detect_runtime(choice: str) -> str | None:
-    """'podman', 'docker' or 'local'; None if what was asked for is not installed."""
-    candidates = ENGINES if choice == "auto" else (choice,)
-    for name in candidates:
-        if shutil.which("renovate" if name == "local" else name):
-            return name
+def flag(arg: str) -> str:
+    """'--dry-run' for '--dry-run=full'."""
+    return arg.split("=", 1)[0]
+
+
+def passthrough_value(passthrough: list[str], name: str) -> str | None:
+    """The value given to flag `name` after `--`, as `--name=value` or `--name value`."""
+    for i, arg in enumerate(passthrough):
+        if arg.startswith(f"{name}="):
+            return arg.split("=", 1)[1]
+        if arg == name:
+            following = passthrough[i + 1 : i + 2]
+            return following[0] if following and not following[0].startswith("-") else ""
     return None
+
+
+def environment(global_config: str | None) -> dict[str, str]:
+    """`global_config`: where Renovate finds the global config file, if there is one."""
+    env = {
+        "NODE_OPTIONS": "--no-deprecation",
+        "LOG_LEVEL": "debug",
+        "LOG_FORMAT": "json",
+        "RENOVATE_DETECT_HOST_RULES_FROM_ENV": "true",
+        # Renovate's default ('required') skips a repository without a committed config.
+        "RENOVATE_REQUIRE_CONFIG": "optional",
+        "RENOVATE_REPOSITORY_CACHE": "enabled",
+    }
+    if global_config:
+        env["RENOVATE_CONFIG_FILE"] = global_config
+    return env
+
+
+def forwarded_environment() -> list[str]:
+    """Names of the user's variables passed on to Renovate: credentials and settings."""
+    return sorted(
+        k
+        for k in os.environ
+        if (k.startswith("RENOVATE_") and not k.startswith("RENOVATE_PREVIEW_"))
+        or k in LOOKUP_TOKENS
+    )
 
 
 def find_config_file(directory: str) -> Path | None:
@@ -117,175 +140,6 @@ def ignore_paths(value: str, target: Target) -> list[str]:
             pass
     globs += [e.strip() for e in value.split(",") if e.strip()]
     return list(dict.fromkeys(globs))
-
-
-def renovate_env(runtime: str, validate: bool = False) -> dict[str, str]:
-    env = {"NODE_OPTIONS": "--no-deprecation"}
-    if validate:
-        env["LOG_LEVEL"] = "info"
-    else:
-        env |= {
-            "LOG_LEVEL": "debug",
-            "LOG_FORMAT": "json",
-            "RENOVATE_DETECT_HOST_RULES_FROM_ENV": "true",
-            # Renovate's default ('required') skips a repository without a committed config.
-            "RENOVATE_REQUIRE_CONFIG": "optional",
-            "RENOVATE_REPOSITORY_CACHE": "enabled",
-        }
-    if runtime != "local":
-        # The bind-mounted repository is owned by a uid unknown inside the container, so git
-        # refuses it as "dubious ownership", and Renovate then falls back to globbing every
-        # file, .gitignore'd ones included.
-        env |= {
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": "safe.directory",
-            "GIT_CONFIG_VALUE_0": "*",
-        }
-    return env
-
-
-def forwarded_env() -> list[str]:
-    """Credentials and settings from the user's environment, passed on to the container."""
-    return sorted(
-        k
-        for k in os.environ
-        if (k.startswith("RENOVATE_") and not k.startswith("RENOVATE_PREVIEW_"))
-        or k in LOOKUP_TOKENS
-    )
-
-
-def config_files(opts, runtime: str) -> dict[str, tuple[str, str]]:
-    """Config files for Renovate: {environment variable: (host path, path Renovate sees)}.
-
-    RENOVATE_CONFIG_FILE is the user's self-hosted (global) config, if they have one.
-    --config becomes RENOVATE_ADDITIONAL_CONFIG_FILE, which Renovate merges over it.
-    """
-    files = {}
-    for name, value, mounted in (
-        ("RENOVATE_CONFIG_FILE", os.environ.get("RENOVATE_CONFIG_FILE"), "global"),
-        ("RENOVATE_ADDITIONAL_CONFIG_FILE", opts.config, "config"),
-    ):
-        if value:
-            path = Path(value).resolve()
-            inside = str(path) if runtime == "local" else f"{CONFIG_MOUNT}/{mounted}{path.suffix}"
-            files[name] = (str(path), inside)
-    return files
-
-
-def wrap(
-    runtime: str,
-    program: str,
-    args: list[str],
-    env: dict[str, str],
-    image: str,
-    mounts: list[tuple[str, str]],
-    workdir: str | None = None,
-) -> list[str]:
-    """Wrap a Renovate program invocation in `podman run` / `docker run`."""
-    cmd = [runtime, "run", "--rm"]
-    for name in forwarded_env():
-        if name not in env:
-            cmd += ["-e", name]
-    for key, value in env.items():
-        cmd += ["-e", f"{key}={value}"]
-    for host, inside in mounts:
-        # Read-only, and relabelled for SELinux (:z is harmless elsewhere).
-        cmd += ["-v", f"{host}:{inside}:ro,z"]
-    if workdir:
-        cmd += ["-w", workdir]
-    cmd += ["-v", f"{CACHE_VOLUME}:{CACHE_MOUNT}"]
-    cmd.append(image)
-    if program != "renovate":
-        cmd.append(program)
-    return cmd + args
-
-
-def build_command(opts, target: Target, runtime: str) -> Command:
-    args = ["--report-type=logging"]
-    if opts.just_extract:
-        args.append("--dry-run=extract")
-    elif not opts.run:
-        # The local platform silently downgrades 'full' to 'lookup', so ask for what we get.
-        args.append("--dry-run=full" if target.remote else "--dry-run=lookup")
-    if opts.managers:
-        args += ["--enabled-managers", opts.managers]
-    if opts.only:
-        args += ["--include-paths", ",".join(include_paths(opts.only))]
-    if opts.excluded:
-        args += ["--ignore-paths", ",".join(ignore_paths(opts.excluded, target))]
-    args += opts.passthrough
-    if target.remote:
-        # RENOVATE_PLATFORM (with RENOVATE_ENDPOINT) reaches GitLab, Forgejo...
-        args += ["--platform", os.environ.get("RENOVATE_PLATFORM", "github"), target.value]
-    else:
-        args += ["--platform", "local"]
-
-    env = renovate_env(runtime)
-    files = config_files(opts, runtime)
-    env |= {name: inside for name, (_, inside) in files.items()}
-    if opts.config:
-        # The repository's own config is not read at all: ours stands in for it.
-        env["RENOVATE_REQUIRE_CONFIG"] = "ignored"
-        # Renovate can be configured to delete that file once read; it is the user's.
-        env["RENOVATE_DELETE_ADDITIONAL_CONFIG_FILE"] = "false"
-
-    if runtime == "local":
-        return Command(["renovate", *args], env, None if target.remote else target.value)
-    mounts = list(files.values())
-    if not target.remote:
-        mounts.insert(0, (target.value, REPO_MOUNT))
-    workdir = None if target.remote else REPO_MOUNT
-    argv = wrap(runtime, "renovate", args, env, opts.image, mounts, workdir)
-    return Command(argv, {}, None, head=3)
-
-
-def build_validate_command(opts, runtime: str, config: Path) -> Command:
-    env = renovate_env(runtime, validate=True)
-    if runtime == "local":
-        return Command(["renovate-config-validator", "--no-global", str(config)], env, None)
-    inside = f"{CONFIG_MOUNT}/{config.name}"
-    argv = wrap(
-        runtime,
-        "renovate-config-validator",
-        ["--no-global", inside],
-        env,
-        opts.image,
-        [(str(config.resolve()), inside)],
-    )
-    return Command(argv, {}, None, head=3)
-
-
-def run(command: Command, on_line) -> int:
-    """Run Renovate, calling `on_line(line, record)` for each line of output as it arrives.
-
-    `record` is the parsed JSON log record, or None for a line of plain text.
-    """
-    env = {**os.environ, **command.env} if command.env else None
-    with subprocess.Popen(
-        command.argv,
-        cwd=command.cwd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    ) as proc:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.rstrip("\n")
-            on_line(line, parse_record(line))
-    return proc.returncode
-
-
-def parse_record(line: str) -> dict | None:
-    """A JSON log record, or None for the plain text Renovate interleaves with them."""
-    if not line.startswith("{"):
-        return None
-    try:
-        record = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    return record if isinstance(record, dict) else None
 
 
 def credentials_warning(just_extract: bool) -> str | None:
