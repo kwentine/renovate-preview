@@ -24,7 +24,7 @@ examples:
   renovate-preview                        the repository in the current directory
   renovate-preview @owner/repo            a remote GitHub repository (needs RENOVATE_TOKEN)
   renovate-preview @owner/repo --config renovate.json   ... with your config instead of its own
-  renovate-preview --only base --managers kustomize
+  renovate-preview -- --include-paths='base/**' --enabled-managers=kustomize
   renovate-preview -o html -w report.html read the result in a browser
   renovate-preview --from last -o json    the last run again, without running Renovate
   renovate-preview --just-print           show the container command, run nothing
@@ -76,14 +76,6 @@ def parser() -> argparse.ArgumentParser:
         help="only list the dependencies found, do not lookup available versions",
     )
     what.add_argument("--validate", action="store_true", help="only validate the config")
-    what.add_argument("--only", metavar="GLOBS", help="comma-separated paths to limit the run to")
-    what.add_argument(
-        "--except",
-        dest="excluded",
-        metavar="GLOBS",
-        help="comma-separated paths to skip; replaces Renovate's ignorePaths",
-    )
-    what.add_argument("--managers", metavar="LIST", help="comma-separated managers to enable")
     what.add_argument(
         "--global-config",
         metavar="FILE",
@@ -316,9 +308,6 @@ def check_replay(opts) -> str | None:
         "a repository": opts.repository,
         "--extract": opts.extract,
         "--validate": opts.validate,
-        "--only": opts.only,
-        "--except": opts.excluded,
-        "--managers": opts.managers,
         "--config": opts.config,
         "--global-config": opts.global_config
         not in (None, os.environ.get("RENOVATE_CONFIG_FILE")),

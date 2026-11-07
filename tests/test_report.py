@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from renovate_preview.report import dependency_rows, parse_record, summarize
+from renovate_preview.report import dependency_rows, parse_record, sort_key, summarize
 
 LOOKUP = Path(__file__).parent / "data" / "lookup.ndjson"
 # A real run with minimumReleaseAge (Renovate 44.164.10, October 2026).
@@ -91,6 +91,21 @@ class ReleaseAgeTests(unittest.TestCase):
         row = self.rows["cert-manager"]
         self.assertEqual((row["new"], row["pending_versions"]), ("v1.21.1", ["v1.21.2"]))
         self.assertFalse(row["pending_checks"])
+
+
+class SortTests(unittest.TestCase):
+    def test_by_dependency_ignoring_case(self):
+        rows = summarize("x", records(RELEASE_AGE))["updates"]
+        names = [row["dependency"] for row in rows]
+        self.assertEqual(names, sorted(names, key=str.lower))
+        self.assertEqual(names[:2], ["cert-manager", "Deployment"])
+
+    def test_youngest_first_then_unknown_age_in_renovate_order(self):
+        def row(new, age):
+            return {"dependency": "a", "new": new, "current": "1", "age_days": age, "file": "f"}
+
+        rows = [row("v3", 10), row("v1", None), row("v2", 200), row("v0", None)]
+        self.assertEqual([r["new"] for r in sorted(rows, key=sort_key)], ["v3", "v2", "v1", "v0"])
 
 
 class DependencyRowTests(unittest.TestCase):

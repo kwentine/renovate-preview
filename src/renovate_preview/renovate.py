@@ -16,7 +16,6 @@ CONFIG_FILE_NAMES = (
     ".github/renovate.json",
     ".gitlab/renovate.json",
 )
-GLOB_CHARS = set("*?[]{}!")
 GITHUB = "github.com"
 # Any of these authenticates github.com version lookups (the last two as host rules).
 LOOKUP_TOKENS = ("RENOVATE_TOKEN", "RENOVATE_GITHUB_COM_TOKEN", "GITHUB_COM_TOKEN")
@@ -45,13 +44,6 @@ def arguments(opts, target: Target) -> list[str]:
     else:
         # The local platform can't do 'full': it would silently downgrade to 'lookup'.
         ours["--dry-run"] = "full" if target.remote else "lookup"
-    if opts.managers:
-        ours["--enabled-managers"] = opts.managers
-    if opts.only:
-        ours["--include-paths"] = ",".join(include_paths(opts.only))
-    if opts.excluded:
-        # Replaces Renovate's ignorePaths, including its defaults and the repository's.
-        ours["--ignore-paths"] = opts.excluded
     if opts.passthrough:
         # Renovate's default, but a global config could turn it off.
         ours["--force-cli"] = "true"
@@ -119,16 +111,6 @@ def find_config_file(directory: str) -> Path | None:
         if (Path(directory) / name).is_file():
             return Path(directory) / name
     return None
-
-
-def include_paths(value: str) -> list[str]:
-    """Renovate matches a bare `base` against a file of exactly that name; also add `base/**`."""
-    globs = []
-    for entry in filter(None, (e.strip().rstrip("/") for e in value.split(","))):
-        globs.append(entry)
-        if not GLOB_CHARS & set(entry):
-            globs.append(f"{entry}/**")
-    return globs
 
 
 def credentials_warning(extract: bool) -> str | None:

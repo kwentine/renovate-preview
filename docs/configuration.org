@@ -11,7 +11,7 @@ From lowest to highest priority:
 | 1. defaults          | Renovate's built-in defaults                                                     |
 | 2. global config     | the self-hosted config: =--global-config= (or =RENOVATE_CONFIG_FILE=), then =RENOVATE_*= variables |
 | 3. repository config | the repository's =renovate.json=, or =--config= instead (remote repositories)    |
-| 4. command line      | Renovate flags: =--only=, =--except=, =--managers=, anything after =--=          |
+| 4. command line      | Renovate flags: anything after =--=                                              |
 
 When two layers set the same option, the higher one's value is used. Options that only
 one layer sets are kept.
@@ -104,9 +104,8 @@ The flag replaces the repository's =ignorePaths=: =a/= is back, =b/= is gone.
 =RENOVATE_IGNORE_PATHS='["b/**"]'= instead changes nothing: it is global config, so the
 repository's =ignorePaths= wins over it.
 
-=--only=, =--except= and =--managers= are flags too, so they win over the repository config
-the same way: =--except= replaces the repository's =ignorePaths= rather than adding to it
-(see the README).
+=--include-paths= or =--enabled-managers= after =--= win over the repository config the same
+way.
 
 * Remote repositories
 

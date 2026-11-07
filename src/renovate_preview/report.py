@@ -83,10 +83,17 @@ def summarize(target: str, records: list[dict]) -> dict:
         "target": target,
         "renovate_version": version,
         "files_scanned": (stats or {}).get("fileCount"),
-        "updates": sorted(updates, key=lambda r: (r["file"], r["dependency"])),
+        "updates": sorted(updates, key=sort_key),
         "branches": branches,
         "problems": problems,
     }
+
+
+def sort_key(row: dict) -> tuple:
+    """By dependency, then the new version's age (youngest first, unknown last), then the
+    file. The sort is stable: rows still tied stay in Renovate's order."""
+    age = row["age_days"]
+    return (str(row["dependency"] or "").lower(), age is None, age or 0, row["file"] or "")
 
 
 UPDATE_KEYS = (

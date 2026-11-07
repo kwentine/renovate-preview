@@ -9,7 +9,6 @@ from renovate_preview.renovate import (
     arguments,
     environment,
     forwarded_environment,
-    include_paths,
     passthrough_value,
 )
 
@@ -26,11 +25,6 @@ class TargetTests(unittest.TestCase):
 
     def test_local_defaults_to_the_current_directory(self):
         self.assertEqual(Target.parse(None), Target(False, str(Path.cwd())))
-
-
-class PathFilterTests(unittest.TestCase):
-    def test_bare_directory_also_matches_its_subtree(self):
-        self.assertEqual(include_paths("base/, a/*.yaml"), ["base", "base/**", "a/*.yaml"])
 
 
 class ArgumentTests(unittest.TestCase):
@@ -53,14 +47,6 @@ class ArgumentTests(unittest.TestCase):
         self.assertIn("--endpoint=https://ghe.example.com/api/v3/", argv)
         self.assertFalse([a for a in args("@o/r") if a.startswith("--endpoint")])
 
-    def test_except_is_passed_as_given(self):
-        self.assertIn("--ignore-paths=manifests,a/**", args("/tmp", "--except", "manifests,a/**"))
-
-    def test_filters(self):
-        argv = args("/tmp", "--only", "base", "--managers", "kustomize")
-        self.assertIn("--include-paths=base,base/**", argv)
-        self.assertIn("--enabled-managers=kustomize", argv)
-
 
 class PassthroughTests(unittest.TestCase):
     """Arguments after `--` win: over ours, and (with --force-cli) over the repo config."""
@@ -81,10 +67,10 @@ class PassthroughTests(unittest.TestCase):
         self.assertNotIn("--force-cli=true", args("/tmp"))
 
     def test_ours_are_dropped_when_given_again(self):
-        argv = args("/tmp", "--only", "base", "--", "--include-paths", "x", "--dry-run=extract")
-        self.assertFalse([a for a in argv if a.startswith("--include-paths=")])
+        argv = args("/tmp", "--", "--dry-run", "extract", "--platform=local")
         self.assertNotIn("--dry-run=lookup", argv)
-        self.assertEqual(argv[-3:], ["--include-paths", "x", "--dry-run=extract"])
+        self.assertEqual(argv.count("--platform=local"), 1)  # theirs, not ours too
+        self.assertEqual(argv[-3:], ["--dry-run", "extract", "--platform=local"])
 
     def test_remote_repository_stays_last(self):
         self.assertEqual(args("@o/r", "--", "--foo")[-2:], ["--foo", "o/r"])

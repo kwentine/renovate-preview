@@ -16,7 +16,7 @@ trust-manager  v0.22.0  v0.26.0  kustomization.yaml
 trust-manager  v0.22.0  v0.22.1  kustomization.yaml
 #+end_example
 
-* To try it out
+* Try it
 
 #+begin_example
 $ git clone git@github.com:kwentine/renovate-preview.git
@@ -58,9 +58,9 @@ renovate-preview --pat-url                 # a link to create that token: read-o
 renovate-preview --extract                 # only the dependencies found: fast, offline
 renovate-preview --validate                # only validate the config
 
-renovate-preview --only base               # limit to some paths...
-renovate-preview --except 'overlays/**'    # ... or skip some
-renovate-preview --managers kubernetes     # limit to some managers
+renovate-preview -- --include-paths='base/**'       # limit to some paths
+renovate-preview -- --ignore-paths='overlays/**'     # skip some (replaces ignorePaths)
+renovate-preview -- --enabled-managers=kubernetes    # limit to some managers
 
 renovate-preview --columns dependency,new,type,breaking,age   # other columns, in this order
 renovate-preview --columns all             # every column; --columns help lists them
@@ -80,8 +80,8 @@ renovate-preview -- --ignore-paths='a/**'  # pass arguments on to Renovate
 #+end_src
 
 Arguments after =--= win: over the repository config (renovate-preview adds
-=--force-cli=true=), and over renovate-preview's own (=--only= is dropped if you pass
-=--include-paths=).
+=--force-cli=true=), and over renovate-preview's own (its =--dry-run=lookup= is dropped if
+you pass =--dry-run=extract=).
 
 * Environment
 
@@ -134,11 +134,13 @@ On a local repository, =--config= is read too, but the repository's own =renovat
   =--from FILE=.
 - *Only files known to git are seen.* Renovate lists files with =git ls-files=, so =git add=
   a new manifest before previewing it.
-- *=--except= replaces Renovate's =ignorePaths=.* It becomes =--ignore-paths=, as given,
-  which replaces everything configured: Renovate's defaults (=**/node_modules/**=...), your
+- *=--ignore-paths= replaces Renovate's =ignorePaths=.* Passed after =--=, it replaces
+  everything configured: Renovate's defaults (=**/node_modules/**=...), your
   =renovate.json='s list, and its presets'. List what you still want ignored, or use
-  =--only=. See [[file:examples/preset-extends/][=examples/preset-extends=]].
-- *=--only dir= means =dir= and =dir/**=.* Renovate itself would match only a file named =dir=.
+  =--include-paths=. See [[file:examples/preset-extends/][=examples/preset-extends=]].
+- *=--include-paths= needs a glob for a directory: =base/**=.* A bare =base= only matches a
+  /file/ named =base=, so nothing is scanned. (=--ignore-paths=, by contrast, matches any
+  path /containing/ what you give: =base= also ignores =database/=.)
 
 * With renovate-pretty-log
 
