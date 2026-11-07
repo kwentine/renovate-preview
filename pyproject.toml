@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "renovate-preview"
-version = "0.1.0"
+dynamic = ["version"]  # from src/renovate_preview/__init__.py
 description = "Dry-run Renovate against a repository and see what it would do."
 # PyPI renders no org-mode, so the README is shown as plain text.
 readme = { file = "README.org", content-type = "text/plain" }
@@ -29,6 +29,9 @@ Source = "https://github.com/kwentine/renovate-preview"
 
 [project.scripts]
 renovate-preview = "renovate_preview.cli:main"
+
+[tool.hatch.version]
+path = "src/renovate_preview/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/renovate_preview"]

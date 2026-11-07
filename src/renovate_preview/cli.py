@@ -353,7 +353,8 @@ def check(opts, target: Target) -> str | None:
             "the local platform can't do a full dry run (Renovate turns it into 'lookup'). "
             "For PR titles, preview the remote repository: renovate-preview @owner/repo"
         )
-    if target.remote and not opts.just_print and not os.environ.get("RENOVATE_TOKEN"):
+    needs_token = target.remote and not (opts.just_print or opts.validate)
+    if needs_token and not os.environ.get("RENOVATE_TOKEN"):
         return "RENOVATE_TOKEN must be set to reach a remote repository (see --pat-url)"
     return None
 

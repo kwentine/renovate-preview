@@ -1,0 +1,39 @@
+name: release
+
+# Push a tag such as v0.1.0. The package goes to PyPI through trusted publishing: no
+# token is stored anywhere. See https://docs.pypi.org/trusted-publishers/
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: The tag matches the version in the code
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/renovate_preview/__init__.py)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME, code $version"; exit 1; }
+      - run: uv build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

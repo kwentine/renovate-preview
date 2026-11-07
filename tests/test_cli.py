@@ -7,8 +7,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from renovate_preview.cli import columns, last_run, main, parse_args
+from renovate_preview.cli import check, columns, last_run, main, parse_args
 from renovate_preview.render import COLUMNS
+from renovate_preview.renovate import Target
 
 
 def run(*argv, env=None):
@@ -88,6 +89,15 @@ class ArgumentTests(unittest.TestCase):
         code, _, err = run("@o/r")
         self.assertEqual(code, 2)
         self.assertIn("RENOVATE_TOKEN", err)
+
+    def test_validating_a_config_needs_no_token(self):
+        with tempfile.NamedTemporaryFile(suffix=".json") as config:
+            self.assertIsNone(
+                check(
+                    parse_args(["@o/r", "--validate", "--config", config.name]),
+                    Target(True, "o/r"),
+                )
+            )
 
     def test_global_config_defaults_to_renovate_config_file(self):
         with tempfile.NamedTemporaryFile(suffix=".json") as config:
