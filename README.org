@@ -1,32 +1,49 @@
 #+TITLE: renovate-preview
 #+OPTIONS: toc:nil num:nil
 
-Dry-run [[https://docs.renovatebot.com/][Renovate]] against a repository, and read what it would do as a table.
+Dry-run [[https://docs.renovatebot.com/][Renovate]] against a repository, and preview the results as a table.
+
+Renovate runs in a container, using =podman= or =docker= (whichever is installed).
 
 #+begin_example
 $ cd path/to/repo
 $ $EDITOR renovate.json
+$ podman pull ghcr.io/renovatebot/renovate
 $ renovate-preview
 DEPENDENCY     CURRENT  NEW      FILE
 -------------  -------  -------  ------------------
-trust-manager  v0.22.0  v0.22.1  kustomization.yaml
 trust-manager  v0.22.0  v0.26.0  kustomization.yaml
+trust-manager  v0.22.0  v0.22.1  kustomization.yaml
 #+end_example
+
+* To try it out
+
+#+begin_example
+$ git clone git@github.com:kwentine/renovate-preview.git
+$ cd renovate-preview/src
+$ python -m renovate_preview path/to/my/repo
+#+end_example
+
 
 * Install
 
-#+begin_src sh
-uv tool install renovate-preview   # or, from a checkout: uv tool install .
-make install                       # or: a launcher in ~/.local/bin running this checkout
-#+end_src
-
-Renovate runs in a container, using =podman= or =docker= (whichever is installed).
+** From PyPI Using =uv=
 
 #+begin_src sh
-podman pull ghcr.io/renovatebot/renovate   # or: docker pull ...
+uv tool install renovate-preview   # or,
 #+end_src
 
-Each run prints the Renovate version it uses.
+** From a local checkout
+Using =uv=:
+#+begin_src sh
+uv tool install .
+#+end_src
+
+Alternatively, install as an executable in =~/.local/bin=:
+#+begin_src sh
+make install
+#+end_src
+
 
 * Usage
 
