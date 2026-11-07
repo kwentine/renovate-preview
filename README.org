@@ -24,7 +24,6 @@ $ cd renovate-preview/src
 $ python -m renovate_preview path/to/my/repo
 #+end_example
 
-
 * Install
 
 ** From PyPI Using =uv=
@@ -44,39 +43,38 @@ Alternatively, install as an executable in =~/.local/bin=:
 make install
 #+end_src
 
-
 * Usage
 
 #+begin_src sh
-renovate-preview                           # the repository in the current directory
-renovate-preview path/to/repo              # another one
-renovate-preview @owner/repo               # a GitHub repository (needs RENOVATE_TOKEN)
-renovate-preview @owner/repo --host ghe.example.com   # ... on a GitHub Enterprise Server
-renovate-preview @owner/repo --config renovate.json   # ... with your config instead of its own
-renovate-preview --pat-url                 # a link to create that token: read-only, pre-filled
+  renovate-preview                           # the repository in the current directory
+  renovate-preview path/to/repo              # another one
+  renovate-preview @owner/repo               # a GitHub repository (needs RENOVATE_TOKEN)
+  renovate-preview @owner/repo --host ghe.example.com   # ... on a GitHub Enterprise Server
+  renovate-preview @owner/repo --config renovate.json   # ... with your config instead of its own
+  renovate-preview --pat-url                 # a link to create that token: read-only, pre-filled
 
-renovate-preview --extract                 # only the dependencies found: fast, offline
-renovate-preview --validate                # only validate the config
+  renovate-preview --extract                 # only the dependencies found: fast, offline
+  renovate-preview --validate                # only validate the config
 
-renovate-preview -- --include-paths='base/**'       # limit to some paths
-renovate-preview -- --ignore-paths='overlays/**'     # skip some (replaces ignorePaths)
-renovate-preview -- --enabled-managers=kubernetes    # limit to some managers
+  # Pass on arguments after -- to Renovate, for example:
+  renovate-preview -- --include-paths='base/**'       # limit to some paths
+  renovate-preview -- --ignore-paths='overlays/**'     # skip some (replaces ignorePaths)
+  renovate-preview -- --enabled-managers=kubernetes    # limit to some managers
 
-renovate-preview --columns dependency,new,type,breaking,age   # other columns, in this order
-renovate-preview --columns all             # every column; --columns help lists them
-renovate-preview -o json                   # table (default), json, html
-renovate-preview -o html -w report.html    # ... written to a file rather than stdout
-renovate-preview -o raw                    # Renovate's own log; or its report: -o report
-renovate-preview --from last --columns all # the last run again, other columns: no re-run
-renovate-preview --from run.ndjson         # any Renovate JSON log (- for stdin)
-renovate-preview --verbose                 # what Renovate is doing, as it runs
-renovate-preview --silent                  # no progress hints or warnings
+  renovate-preview --columns dependency,new,type,breaking,age   # select columns to display
+  renovate-preview --columns all             # every column; --columns help lists them
+  renovate-preview -o json                   # table (default), json, html
+  renovate-preview -o html -w report.html    # ... written to a file rather than stdout
+  renovate-preview -o raw                    # Renovate's own log; or its report: -o report
+  renovate-preview --from last --columns all # the last run again, other columns: no re-run
+  renovate-preview --from run.ndjson         # any Renovate JSON log (- for stdin)
+  renovate-preview --verbose                 # what Renovate is doing, as it runs
+  renovate-preview --silent                  # no progress hints or warnings
 
-renovate-preview --global-config config.js # a self-hosted (global) config
-renovate-preview --tag 44.115.2            # a given Renovate version
-renovate-preview --just-print              # the container command, without running it
-renovate-preview --shell                   # a shell in that container, instead of Renovate
-renovate-preview -- --ignore-paths='a/**'  # pass arguments on to Renovate
+  renovate-preview --global-config config.js # a self-hosted (global) config
+  renovate-preview --tag 44.115.2            # a given Renovate version
+  renovate-preview --just-print              # the container command, without running it
+  renovate-preview --shell                   # a shell in that container, instead of Renovate
 #+end_src
 
 Arguments after =--= win: over the repository config (renovate-preview adds
