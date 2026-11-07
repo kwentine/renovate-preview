@@ -62,12 +62,12 @@ And a self-hosted (global) config, next to it in [[file:demo/][=docs/demo/=]]. I
 * Scenarios
 
 Run them from =docs/demo/repo=. Renovate only sees the files git tracks, so this works in
-a checkout of this project.
+a checkout of this project. =--columns file,branch= shows just what changes.
 
 ** 1. The repository's own config
 
 #+begin_src sh
-renovate-preview
+renovate-preview --columns file,branch
 #+end_src
 
 | FILE                   | BRANCH                |
@@ -78,7 +78,7 @@ renovate-preview
 ** 2. A global config and the repository's: both apply, the repository's wins
 
 #+begin_src sh
-renovate-preview --global-config ../global.json
+renovate-preview --columns file,branch --global-config ../global.json
 #+end_src
 
 | FILE                   | BRANCH              |
@@ -94,7 +94,7 @@ preview matches what that instance does.
 ** 3. Command-line flags win over every config
 
 #+begin_src sh
-renovate-preview -- --ignore-paths='b/**'
+renovate-preview --columns file,branch -- --ignore-paths='b/**'
 #+end_src
 
 | FILE                   | BRANCH                |
@@ -105,12 +105,12 @@ The flag replaces the repository's =ignorePaths=: =a/= is back, =b/= is gone.
 repository's =ignorePaths= wins over it.
 
 =--only=, =--except= and =--managers= are flags too, so they win over the repository config
-the same way. That is why =--except= has to restate the =ignorePaths= it keeps (see the
-README).
+the same way: =--except= replaces the repository's =ignorePaths= rather than adding to it
+(see the README).
 
 * Remote repositories
 
-=renovate-preview @org/repo= uses the same layers, with the repository's config as it is
+=renovate-preview @owner/repo= uses the same layers, with the repository's config as it is
 on its default branch. To try a change to it, clone the repository, edit its
 =renovate.json=, and preview the clone. The one thing a remote preview adds is PR titles:
 Renovate's local platform stops before computing them.

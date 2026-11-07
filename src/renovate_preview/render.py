@@ -5,27 +5,27 @@ from __future__ import annotations
 import html
 import json
 
-COLUMNS = (
-    ("DEPENDENCY", "dependency"),
-    ("CURRENT", "current"),
-    ("NEW", "new"),
-    ("TYPE", "type"),
-    ("AGE", "age_days"),
-    ("PENDING", "pending"),
-    ("FILE", "file"),
-    ("BRANCH", "branch"),
-    ("PR TITLE", "pr_title"),
-)
+# The columns --columns can name, in this order by default: {name: (title, row key)}.
+COLUMNS = {
+    "dependency": ("DEPENDENCY", "dependency"),
+    "current": ("CURRENT", "current"),
+    "new": ("NEW", "new"),
+    "type": ("TYPE", "type"),
+    "breaking": ("BREAKING", "breaking"),
+    "age": ("AGE", "age_days"),
+    "pending": ("PENDING", "pending"),
+    "manager": ("MANAGER", "manager"),
+    "datasource": ("DATASOURCE", "datasource"),
+    "versioning": ("VERSIONING", "versioning"),
+    "file": ("FILE", "file"),
+    "branch": ("BRANCH", "branch"),
+    "pr-title": ("PR TITLE", "pr_title"),
+}
 
 
-def columns(rows: list[dict]) -> list[tuple[str, str]]:
-    """The columns with something in them (e.g. --just-extract has no NEW). AGE stays with
-    the updates even when empty: a missing release date is worth seeing."""
-    return [
-        (title, key)
-        for title, key in COLUMNS
-        if any(cell(row, "new" if key == "age_days" else key) != "-" for row in rows)
-    ]
+def default_columns(extract: bool) -> list[str]:
+    """With --extract there are no versions to look up, so no NEW."""
+    return ["dependency", "current", *([] if extract else ["new"]), "file"]
 
 
 def cell(row: dict, key: str) -> str:
@@ -35,6 +35,8 @@ def cell(row: dict, key: str) -> str:
         return f"{row['age_days']} day{'' if row['age_days'] == 1 else 's'}"
     if key == "pending":
         return pending(row)
+    if key == "breaking":
+        return {True: "yes", False: "no"}.get(row["breaking"], "-")
     return str(row[key] or "-")
 
 
@@ -49,11 +51,11 @@ def pending(row: dict) -> str:
     return held[-1] + (f" (+{len(held) - 1})" if len(held) > 1 else "")
 
 
-def table(document: dict) -> str:
+def table(document: dict, names: list[str]) -> str:
     rows = document["updates"]
     if not rows:
         return "No dependencies found."
-    cols = columns(rows)
+    cols = [COLUMNS[name] for name in names]
     data = [[title for title, _ in cols]] + [[cell(row, key) for _, key in cols] for row in rows]
     widths = [max(len(line[i]) for line in data) for i in range(len(cols))]
     data.insert(1, ["-" * w for w in widths])
@@ -107,28 +109,30 @@ box?.addEventListener('input', () => {
 """
 
 
-MONO = ("current", "new", "age_days", "pending", "file", "branch")
+MONO = ("current", "new", "age_days", "pending", "versioning", "file", "branch")
 
 
 def esc(value) -> str:
     return html.escape("" if value is None else str(value))
 
 
-def html_page(document: dict) -> str:
+def html_page(document: dict, names: list[str]) -> str:
     """The whole result as one self-contained page: no network, opens straight off disk."""
     rows = document["updates"]
-    cols = [(title, key) for title, key in columns(rows) if key != "type"] if rows else []
+    cols = [COLUMNS[name] for name in names]
     head = "".join(f"<th>{esc(title)}</th>" for title, _ in cols)
     body = []
     for row in rows:
         cells = []
         for _, key in cols:
             value = esc(cell(row, key))
-            if key == "new" and row["type"]:
-                value += f' <span class="badge {esc(row["type"])}">{esc(row["type"])}</span>'
             classes = ["mono"] if key in MONO else []
             hint = ""
-            if key == "age_days" and row["new"] and row["age_days"] is None:
+            if key == "type" and row["type"]:
+                classes += ["badge", row["type"]]
+            elif key == "breaking" and row["breaking"]:
+                classes.append("major")
+            elif key == "age_days" and row["new"] and row["age_days"] is None:
                 classes.append("warn")
                 hint = "No release date: Renovate can't check minimumReleaseAge"
             elif key == "age_days" and row["release_timestamp"]:
@@ -140,7 +144,7 @@ def html_page(document: dict) -> str:
                     if row["pending_checks"]
                     else "Newer versions wait for checks: " + ", ".join(row["pending_versions"])
                 )
-            attrs = f' class="{" ".join(classes)}"' if classes else ""
+            attrs = f' class="{esc(" ".join(classes))}"' if classes else ""
             attrs += f' title="{esc(hint)}"' if hint else ""
             cells.append(f"<td{attrs}>{value}</td>")
         body.append(f"<tr>{''.join(cells)}</tr>")
@@ -157,12 +161,13 @@ def html_page(document: dict) -> str:
             f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>"
         )
         legend = []
-        if any(row["new"] and row["age_days"] is None for row in rows):
+        keys = {key for _, key in cols}
+        if "age_days" in keys and any(row["new"] and row["age_days"] is None for row in rows):
             legend.append(
                 '<span class="warn">AGE -</span> no release date: Renovate can\'t check'
                 " minimumReleaseAge"
             )
-        if any(pending(row) != "-" for row in rows):
+        if "pending" in keys and any(pending(row) != "-" for row in rows):
             legend.append(
                 '<span class="pending">PENDING</span> waiting for checks such as'
                 " minimumReleaseAge: yes for this update, or the newest version held back"

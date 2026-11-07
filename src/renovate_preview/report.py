@@ -93,6 +93,7 @@ UPDATE_KEYS = (
     "new",
     "type",
     "branch",
+    "breaking",
     "age_days",
     "release_timestamp",
     "pending_checks",
@@ -110,6 +111,7 @@ def dependency_rows(manager: str, package_file: dict) -> list[dict]:
             "current": current,
             "manager": manager,
             "datasource": dep.get("datasource"),
+            "versioning": dep.get("versioning"),
             "file": package_file.get("packageFile"),
             "skip_reason": dep.get("skipReason"),
         }
@@ -128,6 +130,8 @@ def dependency_rows(manager: str, package_file: dict) -> list[dict]:
                     "new": new,
                     "type": update.get("updateType"),
                     "branch": update.get("branchName"),
+                    # As the versioning scheme says: under semver, any 0.x change is.
+                    "breaking": update.get("isBreaking"),
                     # Absent when the datasource gives no release timestamp.
                     "age_days": update.get("newVersionAgeInDays"),
                     "release_timestamp": update.get("releaseTimestamp"),

@@ -1,6 +1,6 @@
 """Each example still extracts what its expected.json says.
 
-These run Renovate for real (offline, with --just-extract), so they only run on request:
+These run Renovate for real (offline, with --extract), so they only run on request:
     make examples                       # or RENOVATE_PREVIEW_E2E=1 make test
 """
 
@@ -20,7 +20,7 @@ FIELDS = ("dependency", "current", "manager", "file")
 def extract(example: Path) -> list[dict]:
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = main(["--just-extract", "--silent", "-o", "json", str(example)])
+        code = main(["--extract", "--silent", "-o", "json", str(example)])
     if code != 0:
         raise AssertionError(f"renovate-preview exited {code}")
     rows = json.loads(out.getvalue())["updates"]

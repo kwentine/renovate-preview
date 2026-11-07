@@ -15,13 +15,12 @@ One run goes through five steps, one module each (=src/renovate_preview/=):
 
 * 1. Renovate's command line and environment (=renovate.py=)
 
-=arguments()= translates the flags: =--just-extract= → =--dry-run=extract=, =--only= →
-=--include-paths=, and so on. Arguments after =--= come last, with =--force-cli=true= so
-they win over the repository config; a flag of ours that you also pass is dropped.
-=environment()= sets what a preview needs: a JSON debug log (=LOG_FORMAT=json=), a config
-that may be missing (=RENOVATE_REQUIRE_CONFIG=optional=), the repository cache. Your own
-=RENOVATE_*= variables are forwarded to the container by name, so no token value shows
-in the command line.
+- Translate =renovate-preview= shorthand arguments to their =renovate= equivalents
+  Ex: =--extract= becomes =--dry-run=extract=
+  Arguments after =--= are passed through unchanged, shadowing identical shortcut arguments.
+
+- Configure the environment variables a preview needs. a JSON debug log (=LOG_FORMAT=json=), a config
+  Existing =RENOVATE_*= variables in the environment are forwarded to the container.
 
 * 2. The container's filesystem (=container.py=: =filesystem()=)
 

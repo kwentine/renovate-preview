@@ -1,5 +1,4 @@
-import contextlib
-import io
+import logging
 import os
 import tempfile
 import unittest
@@ -73,17 +72,17 @@ class ProgressTests(unittest.TestCase):
         "some later plain text",
     )
 
-    def shown(self, verbose=False):
-        messages = []
-        err = io.StringIO()
-        progress = Progress(messages.append, verbose, "podman, img:latest")
-        with contextlib.redirect_stderr(err):
+    def shown(self, level):
+        logger = logging.getLogger("renovate_preview")
+        logger.setLevel(level)
+        progress = Progress("podman, img:latest")
+        with self.assertLogs(logger, level) as logs:
             for line in self.LINES:
                 progress(line)
-        return messages, err.getvalue()
+        return [record.getMessage() for record in logs.records]
 
     def test_default(self):
-        messages, _ = self.shown()
+        messages = self.shown(logging.INFO)
         self.assertEqual(
             messages,
             [
@@ -94,6 +93,6 @@ class ProgressTests(unittest.TestCase):
         )
 
     def test_verbose_shows_every_record(self):
-        messages, err = self.shown(verbose=True)
+        messages = self.shown(logging.DEBUG)
         self.assertNotIn("extracting dependencies...", messages)
-        self.assertIn("DEBUG extract()", err)
+        self.assertIn("DEBUG extract()", messages)

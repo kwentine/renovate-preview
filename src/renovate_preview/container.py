@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import shlex
 import shutil
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .renovate import Target, forwarded_environment
 from .report import PHASES, level, parse_record
+
+log = logging.getLogger(__name__)
 
 IMAGE = "ghcr.io/renovatebot/renovate"
 TAG = "latest"
@@ -51,12 +53,9 @@ def filesystem(target: Target, global_config: str | None) -> Filesystem:
     return fs
 
 
-def detect_engine(choice: str) -> str | None:
-    """'podman' or 'docker'; None if what was asked for is not installed."""
-    for name in ENGINES if choice == "auto" else (choice,):
-        if shutil.which(name):
-            return name
-    return None
+def detect_engine() -> str | None:
+    """podman, or else docker: whichever is installed."""
+    return next((name for name in ENGINES if shutil.which(name)), None)
 
 
 def command(
@@ -117,11 +116,11 @@ def printable(argv: list[str], head: int = 3) -> str:
 
 
 class Progress:
-    """What the user sees while Renovate runs, on stderr: the Renovate version, then each
-    phase (or each log record, with --verbose)."""
+    """What the user sees while Renovate runs: the Renovate version, then each phase, or
+    each of Renovate's log records with --verbose (the DEBUG level)."""
 
-    def __init__(self, warn, verbose: bool, source: str):
-        self.warn, self.verbose, self.source = warn, verbose, source
+    def __init__(self, source: str):
+        self.source = source
         self.version_shown = False
 
     def __call__(self, line: str) -> None:
@@ -130,11 +129,11 @@ class Progress:
             return
         if not self.version_shown and record.get("renovateVersion"):
             self.version_shown = True
-            self.warn(f"Renovate {record['renovateVersion']} ({self.source})")
-        if self.verbose:
-            print(f"{level(record).upper():<5} {record.get('msg')}", file=sys.stderr)
+            log.info("Renovate %s (%s)", record["renovateVersion"], self.source)
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("%-5s %s", level(record).upper(), record.get("msg"))
         elif record.get("msg") in PHASES:
-            self.warn(f"{PHASES[record['msg']]}...")
+            log.info("%s...", PHASES[record["msg"]])
 
 
 def run(argv: list[str], on_line) -> tuple[int, list[str]]:

@@ -3,7 +3,6 @@ environment."""
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,9 +16,8 @@ CONFIG_FILE_NAMES = (
     ".github/renovate.json",
     ".gitlab/renovate.json",
 )
-# Renovate's default ignorePaths, which a CLI --ignore-paths replaces.
-DEFAULT_IGNORE_PATHS = ("**/node_modules/**", "**/bower_components/**")
 GLOB_CHARS = set("*?[]{}!")
+GITHUB = "github.com"
 # Any of these authenticates github.com version lookups (the last two as host rules).
 LOOKUP_TOKENS = ("RENOVATE_TOKEN", "RENOVATE_GITHUB_COM_TOKEN", "GITHUB_COM_TOKEN")
 
@@ -29,7 +27,7 @@ class Target:
     """What Renovate runs against: a local directory, or a remote repository."""
 
     remote: bool
-    value: str  # absolute directory, or org/repo
+    value: str  # absolute directory, or owner/repo
 
     @classmethod
     def parse(cls, repository: str | None) -> Target:
@@ -42,9 +40,9 @@ def arguments(opts, target: Target) -> list[str]:
     """Renovate's command line. Arguments passed after `--` win over ours: we drop a flag of
     ours that they also give, and --force-cli makes them win over the repository config."""
     ours = {"--report-type": "logging"}
-    if opts.just_extract:
+    if opts.extract:
         ours["--dry-run"] = "extract"
-    elif not opts.run:
+    else:
         # The local platform can't do 'full': it would silently downgrade to 'lookup'.
         ours["--dry-run"] = "full" if target.remote else "lookup"
     if opts.managers:
@@ -52,13 +50,16 @@ def arguments(opts, target: Target) -> list[str]:
     if opts.only:
         ours["--include-paths"] = ",".join(include_paths(opts.only))
     if opts.excluded:
-        ours["--ignore-paths"] = ",".join(ignore_paths(opts.excluded, target))
+        # Replaces Renovate's ignorePaths, including its defaults and the repository's.
+        ours["--ignore-paths"] = opts.excluded
     if opts.passthrough:
         # Renovate's default, but a global config could turn it off.
         ours["--force-cli"] = "true"
     # RENOVATE_PLATFORM (with RENOVATE_ENDPOINT) reaches GitLab, Forgejo...
     remote_platform = os.environ.get("RENOVATE_PLATFORM", "github")
     ours["--platform"] = remote_platform if target.remote else "local"
+    if opts.host != GITHUB:
+        ours["--endpoint"] = f"https://{opts.host}/api/v3/"  # GitHub Enterprise Server
 
     theirs = {flag(arg) for arg in opts.passthrough}
     args = [f"{name}={value}" for name, value in ours.items() if name not in theirs]
@@ -89,8 +90,6 @@ def environment(global_config: str | None) -> dict[str, str]:
         "LOG_LEVEL": "debug",
         "LOG_FORMAT": "json",
         "RENOVATE_DETECT_HOST_RULES_FROM_ENV": "true",
-        # Renovate's default ('required') skips a repository without a committed config.
-        "RENOVATE_REQUIRE_CONFIG": "optional",
         "RENOVATE_REPOSITORY_CACHE": "enabled",
     }
     if global_config:
@@ -125,25 +124,8 @@ def include_paths(value: str) -> list[str]:
     return globs
 
 
-def ignore_paths(value: str, target: Target) -> list[str]:
-    """--except adds to ignorePaths, but a CLI --ignore-paths *replaces* the configured value.
-
-    So restate Renovate's defaults and the repository's own list, when it is plain JSON.
-    """
-    globs = list(DEFAULT_IGNORE_PATHS)
-    config = None if target.remote else find_config_file(target.value)
-    if config:
-        try:
-            own = json.loads(config.read_text()).get("ignorePaths", [])
-            globs += [g for g in own if isinstance(g, str)]
-        except (OSError, ValueError, AttributeError):
-            pass
-    globs += [e.strip() for e in value.split(",") if e.strip()]
-    return list(dict.fromkeys(globs))
-
-
-def credentials_warning(just_extract: bool) -> str | None:
-    if just_extract or any(os.environ.get(name) for name in LOOKUP_TOKENS):
+def credentials_warning(extract: bool) -> str | None:
+    if extract or any(os.environ.get(name) for name in LOOKUP_TOKENS):
         return None
     return (
         f"none of {', '.join(LOOKUP_TOKENS)} is set: GitHub rate-limits anonymous version "

@@ -13,7 +13,7 @@ $ renovate-preview examples/kustomize --just-print   # ... and the Renovate comm
 $ make examples                                      # check them all (offline)
 ```
 
-`make examples` runs each one with `--just-extract`, and checks the dependencies found
+`make examples` runs each one with `--extract`, and checks the dependencies found
 against its `expected.json`.
 
 ## What each one covers
@@ -33,7 +33,7 @@ against its `expected.json`.
 1. `mkdir examples/<feature>` with the smallest manifest that shows the behaviour.
 2. Put *only* the feature under test in its `renovate.json`.
 3. Write the `README.md`: what the feature does, what to expect, and the gotcha if there is one.
-4. Write `expected.json` from what `renovate-preview --just-extract -o json examples/<feature>` finds.
+4. Write `expected.json` from what `renovate-preview --extract -o json examples/<feature>` finds.
 5. `make examples`.
 
 The repository's own [`renovate.json`](../renovate.json) ignores `examples/**`: the versions

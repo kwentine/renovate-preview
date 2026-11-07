@@ -21,8 +21,7 @@ Expected: `cert-manager` from `kustomization.yaml`, and **nothing** from
 value the config resolved to rather than adding to it. Passing `--ignore-paths something`
 would therefore silently un-ignore `tests/` and this example would extract two charts.
 
-`renovate-preview --except` has the same problem: it restates Renovate's defaults and the
-`ignorePaths` written in `renovate.json`, but not those a preset brings in. See for yourself:
+`renovate-preview --except` is that same flag, so it has the same effect. See for yourself:
 
 ```
 $ renovate-preview examples/preset-extends --except foo    # tests/ is extracted too

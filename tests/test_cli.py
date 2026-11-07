@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from renovate_preview.cli import main, parse_args
+from renovate_preview.cli import columns, main, parse_args
+from renovate_preview.render import COLUMNS
 
 
 def run(*argv, env=None):
@@ -51,8 +52,9 @@ class ArgumentTests(unittest.TestCase):
     def test_contradictions_are_rejected(self):
         for argv in (
             ["--silent", "--verbose"],
-            ["--run", "--just-extract", "@o/r"],
-            ["--run", "."],
+            ["--host", "ghe.example.com", "."],
+            ["--columns", "dependency,nope"],
+            ["--columns", ","],
             ["--validate", "@o/r"],
             ["--global-config", "/no/such/file"],
             ["/no/such/directory"],
@@ -61,6 +63,22 @@ class ArgumentTests(unittest.TestCase):
         ):
             with self.subTest(argv=argv):
                 self.assertEqual(run(*argv, "--just-print")[0], 2)
+
+    def test_unknown_column_points_to_help(self):
+        _, _, err = run("--columns", "dep", "--just-print")
+        self.assertIn("unknown column(s) dep: see --columns=help", err)
+
+    def test_columns_help(self):
+        code, out, _ = run("--columns=help")
+        lines = out.splitlines()
+        self.assertEqual(code, 0)
+        self.assertEqual(lines[0].split(), ["dependency", "DEPENDENCY", "(default)"])
+        self.assertIn("new         NEW         (default, unless --extract)", lines)
+        self.assertEqual(lines[-1].split()[0], "all")
+
+    def test_columns_all(self):
+        opts = parse_args(["--columns=all"])
+        self.assertEqual(columns(opts), list(COLUMNS))
 
     def test_full_dry_run_is_fine_remotely(self):
         self.assertEqual(run("@o/r", "--just-print", "--", "--dry-run=full")[0], 0)
@@ -134,4 +152,9 @@ class PatUrlTests(unittest.TestCase):
         code, out, _ = run("--pat-url")
         self.assertEqual(code, 0)
         self.assertTrue(out.startswith("https://github.com/settings/personal-access-tokens/new?"))
-        self.assertIn("&contents=write&", out)
+        self.assertIn("&contents=read&", out)
+        self.assertNotIn("write", out)
+
+    def test_pat_url_on_github_enterprise_server(self):
+        _, out, _ = run("--pat-url", "--host", "ghe.example.com")
+        self.assertTrue(out.startswith("https://ghe.example.com/settings/"))

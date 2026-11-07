@@ -1,5 +1,4 @@
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,7 +9,6 @@ from renovate_preview.renovate import (
     arguments,
     environment,
     forwarded_environment,
-    ignore_paths,
     include_paths,
     passthrough_value,
 )
@@ -34,19 +32,6 @@ class PathFilterTests(unittest.TestCase):
     def test_bare_directory_also_matches_its_subtree(self):
         self.assertEqual(include_paths("base/, a/*.yaml"), ["base", "base/**", "a/*.yaml"])
 
-    def test_except_restates_defaults_and_the_repository_list(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "renovate.json").write_text('{"ignorePaths": ["vendor/**"]}')
-            globs = ignore_paths("overlays/**", Target(False, tmp))
-        self.assertEqual(
-            globs, ["**/node_modules/**", "**/bower_components/**", "vendor/**", "overlays/**"]
-        )
-
-    def test_except_survives_an_unreadable_config(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "renovate.json").write_text("// json5")
-            self.assertIn("x", ignore_paths("x", Target(False, tmp)))
-
 
 class ArgumentTests(unittest.TestCase):
     def test_local(self):
@@ -56,13 +41,20 @@ class ArgumentTests(unittest.TestCase):
 
     def test_scope(self):
         self.assertIn("--dry-run=full", args("@o/r"))
-        self.assertIn("--dry-run=extract", args("--just-extract", "/tmp"))
-        self.assertFalse([a for a in args("--run", "@o/r") if "dry-run" in a])
+        self.assertIn("--dry-run=extract", args("--extract", "/tmp"))
 
     def test_remote(self):
         self.assertEqual(args("@org/repo")[-2:], ["--platform=github", "org/repo"])
         other = args("@o/r", env={"RENOVATE_PLATFORM": "gitlab"})
         self.assertEqual(other[-2:], ["--platform=gitlab", "o/r"])
+
+    def test_github_enterprise_server(self):
+        argv = args("@o/r", "--host", "ghe.example.com")
+        self.assertIn("--endpoint=https://ghe.example.com/api/v3/", argv)
+        self.assertFalse([a for a in args("@o/r") if a.startswith("--endpoint")])
+
+    def test_except_is_passed_as_given(self):
+        self.assertIn("--ignore-paths=manifests,a/**", args("/tmp", "--except", "manifests,a/**"))
 
     def test_filters(self):
         argv = args("/tmp", "--only", "base", "--managers", "kustomize")
@@ -105,6 +97,9 @@ class PassthroughTests(unittest.TestCase):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_renovate_defaults_for_require_config(self):
+        self.assertNotIn("RENOVATE_REQUIRE_CONFIG", environment(None))
+
     def test_global_config(self):
         self.assertNotIn("RENOVATE_CONFIG_FILE", environment(None))
         self.assertEqual(environment("/g.json")["RENOVATE_CONFIG_FILE"], "/g.json")
