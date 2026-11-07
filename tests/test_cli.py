@@ -95,6 +95,32 @@ class ArgumentTests(unittest.TestCase):
         self.assertIn("RENOVATE_CONFIG_FILE=/renovate-preview/global.json", out)
 
 
+class ConfigTests(unittest.TestCase):
+    def test_remote(self):
+        with tempfile.NamedTemporaryFile(suffix=".json") as config:
+            code, out, err = run("@o/r", "--config", config.name, "--just-print")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(f"{config.name}:/renovate-preview/config.json:ro,z", out)
+        self.assertIn("RENOVATE_ADDITIONAL_CONFIG_FILE=/renovate-preview/config.json", out)
+        self.assertIn("RENOVATE_REQUIRE_CONFIG=ignored", out)
+
+    def test_local_warns_that_the_repository_config_wins(self):
+        with tempfile.TemporaryDirectory() as repo, tempfile.NamedTemporaryFile() as config:
+            Path(repo, "renovate.json").write_text("{}")
+            code, _, err = run(repo, "--config", config.name, "--just-print")
+            _, _, without_own = run(tempfile.gettempdir(), "--config", config.name, "--just-print")
+        self.assertEqual(code, 0)
+        self.assertIn("renovate.json is read too, and wins over --config", err)
+        self.assertNotIn("wins over --config", without_own)
+
+    def test_validate_shows_the_file_name(self):
+        with tempfile.NamedTemporaryFile(suffix=".json5") as config:
+            _, out, _ = run("@o/r", "--validate", "--config", config.name, "--just-print")
+        name = Path(config.name).name
+        self.assertIn(f"{config.name}:/usr/src/app/{name}:ro,z", out)
+        self.assertTrue(out.rstrip().endswith(f"--no-global {name}"))
+
+
 class JustPrintTests(unittest.TestCase):
     def test_needs_no_engine(self):
         with mock.patch("shutil.which", return_value=None):

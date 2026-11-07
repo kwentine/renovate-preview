@@ -98,11 +98,21 @@ class PassthroughTests(unittest.TestCase):
 
 class EnvironmentTests(unittest.TestCase):
     def test_renovate_defaults_for_require_config(self):
-        self.assertNotIn("RENOVATE_REQUIRE_CONFIG", environment(None))
+        self.assertNotIn("RENOVATE_REQUIRE_CONFIG", environment(None, None, remote=True))
 
     def test_global_config(self):
-        self.assertNotIn("RENOVATE_CONFIG_FILE", environment(None))
-        self.assertEqual(environment("/g.json")["RENOVATE_CONFIG_FILE"], "/g.json")
+        self.assertNotIn("RENOVATE_CONFIG_FILE", environment(None, None, False))
+        self.assertEqual(environment("/g.json", None, False)["RENOVATE_CONFIG_FILE"], "/g.json")
+
+    def test_config_replaces_the_repository_config_remotely(self):
+        env = environment(None, "/c.json", remote=True)
+        self.assertEqual(env["RENOVATE_ADDITIONAL_CONFIG_FILE"], "/c.json")
+        self.assertEqual(env["RENOVATE_REQUIRE_CONFIG"], "ignored")
+
+    def test_config_locally(self):
+        env = environment(None, "/c.json", remote=False)
+        self.assertEqual(env["RENOVATE_ADDITIONAL_CONFIG_FILE"], "/c.json")
+        self.assertNotIn("RENOVATE_REQUIRE_CONFIG", env)
 
     def test_forwarded_by_name(self):
         env = {"RENOVATE_TOKEN": "x", "GITHUB_COM_TOKEN": "y", "RENOVATE_PREVIEW_RUNTIME": "z"}

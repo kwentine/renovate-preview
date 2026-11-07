@@ -10,7 +10,7 @@ From lowest to highest priority:
 
 | 1. defaults          | Renovate's built-in defaults                                                     |
 | 2. global config     | the self-hosted config: =--global-config= (or =RENOVATE_CONFIG_FILE=), then =RENOVATE_*= variables |
-| 3. repository config | the repository's =renovate.json=                                                 |
+| 3. repository config | the repository's =renovate.json=, or =--config= instead (remote repositories)    |
 | 4. command line      | Renovate flags: =--only=, =--except=, =--managers=, anything after =--=          |
 
 When two layers set the same option, the higher one's value is used. Options that only
@@ -111,6 +111,20 @@ the same way: =--except= replaces the repository's =ignorePaths= rather than add
 * Remote repositories
 
 =renovate-preview @owner/repo= uses the same layers, with the repository's config as it is
-on its default branch. To try a change to it, clone the repository, edit its
-=renovate.json=, and preview the clone. The one thing a remote preview adds is PR titles:
-Renovate's local platform stops before computing them.
+on its default branch. A remote preview adds PR titles: Renovate's local platform stops
+before computing them.
+
+=--config FILE= replaces the repository layer: the repository is treated as if it had no
+config, and yours stands in for it. To review a pull request that changes
+=renovate.json=, check out its branch and preview the remote repository with it:
+
+#+begin_src sh
+renovate-preview @owner/repo --config renovate.json --columns file,branch,pr-title
+#+end_src
+
+Behind the scenes, the file becomes =RENOVATE_ADDITIONAL_CONFIG_FILE=, and
+=RENOVATE_REQUIRE_CONFIG=ignored= stops Renovate from reading the repository's own config
+(=--just-print= shows it). The global config still applies under it.
+
+On a local repository, =--config= can't replace =renovate.json=: Renovate's local platform
+always reads the repository's config, which then wins. Edit =renovate.json= instead.

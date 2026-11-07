@@ -36,6 +36,7 @@ renovate-preview                           # the repository in the current direc
 renovate-preview path/to/repo              # another one
 renovate-preview @owner/repo               # a GitHub repository (needs RENOVATE_TOKEN)
 renovate-preview @owner/repo --host ghe.example.com   # ... on a GitHub Enterprise Server
+renovate-preview @owner/repo --config renovate.json   # ... with your config instead of its own
 renovate-preview --pat-url                 # a link to create that token: read-only, pre-filled
 
 renovate-preview --extract                 # only the dependencies found: fast, offline
@@ -76,13 +77,22 @@ Renovate's working directory, =/tmp/renovate= (its caches), lives in the =renova
 container volume between runs. =podman volume rm renovate-preview= resets it.
 
 * Configuration
+** Global
 
-A repository is previewed with its own =renovate.json=. To try a change, edit it and
-re-run; for a remote repository, clone it first.
+You can specify a global renovate config with  =--global-config FILE=.
 
-=--global-config= adds a self-hosted (global) config. The repository config wins over it,
-and command-line flags win over both.
-[[file:docs/configuration.org][=docs/configuration.org=]] walks through the combinations.
+** Repository
+
+For a local run, the repository's  =renovate.json= is used to produce the preview.
+To test changes, simply edit the local copy and re-run =renovate-preview=.
+
+For a remote repository, you can use a local configuration file using =--config FILE=.
+
+Example: to review a pull request that changes =renovate.json=, check out its branch
+and run =renovate-preview @owner/repo --config renovate.json=. Unlike a local preview, this
+shows PR titles.
+
+On a local repository, =--config= is read too, but the repository's own =renovate.json= takes precedence.
 
 * Good to know
 

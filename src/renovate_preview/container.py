@@ -38,18 +38,27 @@ class Filesystem:
 
     mounts: list[tuple[str, str]] = field(default_factory=list)  # (host, inside)
     workdir: str | None = None
-    global_config: str | None = None  # where the global config file is, inside
+    # Where the config files are, inside.
+    global_config: str | None = None
+    config: str | None = None
+
+    def mount(self, host_path: str, name: str) -> str:
+        """Mount a config file as CONFIG_MOUNT/<name><its extension>; return that path."""
+        path = Path(host_path).resolve()
+        inside = f"{CONFIG_MOUNT}/{name}{path.suffix}"
+        self.mounts.append((str(path), inside))
+        return inside
 
 
-def filesystem(target: Target, global_config: str | None) -> Filesystem:
+def filesystem(target: Target, global_config: str | None, config: str | None) -> Filesystem:
     fs = Filesystem()
     if not target.remote:
         fs.mounts.append((target.value, REPO_MOUNT))
         fs.workdir = REPO_MOUNT
     if global_config:
-        path = Path(global_config).resolve()
-        fs.global_config = f"{CONFIG_MOUNT}/global{path.suffix}"
-        fs.mounts.append((str(path), fs.global_config))
+        fs.global_config = fs.mount(global_config, "global")
+    if config:
+        fs.config = fs.mount(config, "config")
     return fs
 
 

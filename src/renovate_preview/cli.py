@@ -23,6 +23,7 @@ EPILOG = f"""\
 examples:
   renovate-preview                        the repository in the current directory
   renovate-preview @owner/repo            a remote GitHub repository (needs RENOVATE_TOKEN)
+  renovate-preview @owner/repo --config renovate.json   ... with your config instead of its own
   renovate-preview --only base --managers kustomize
   renovate-preview -o html -w report.html read the result in a browser
   renovate-preview --just-print           show the container command, run nothing
@@ -87,6 +88,11 @@ def parser() -> argparse.ArgumentParser:
         metavar="FILE",
         default=os.environ.get("RENOVATE_CONFIG_FILE"),
         help="a self-hosted Renovate global config (default: $RENOVATE_CONFIG_FILE)",
+    )
+    what.add_argument(
+        "--config",
+        metavar="FILE",
+        help="a repository config, instead of the repository's own (e.g. a PR's renovate.json)",
     )
     what.add_argument(
         "--host",
@@ -195,8 +201,14 @@ def preview(opts: argparse.Namespace) -> int:
     if opts.validate:
         return validate(opts, target, engine, image)
 
-    fs = container.filesystem(target, opts.global_config)
-    env = renovate.environment(fs.global_config)
+    fs = container.filesystem(target, opts.global_config, opts.config)
+    env = renovate.environment(fs.global_config, fs.config, target.remote)
+    if opts.config and not target.remote and (own := renovate.find_config_file(target.value)):
+        log.warning(
+            "%s is read too, and wins over --config: Renovate's local platform always reads "
+            "the repository's config",
+            own.relative_to(target.value),
+        )
 
     if opts.shell:
         argv = container.command(engine, image, fs, env, [], "bash", opts.name, interactive=True)
@@ -244,16 +256,17 @@ def check(opts, target: Target) -> str | None:
         return "--silent and --verbose contradict each other"
     if not target.remote and not Path(target.value).is_dir():
         return f"no such directory: {target.value}"
-    if opts.validate and target.remote:
-        return "--validate checks the config of a local repository"
+    if opts.validate and target.remote and not opts.config:
+        return "--validate checks the config of a local repository, or --config"
     if opts.host != GITHUB and not target.remote:
         return "--host goes with a remote repository: @owner/repo"
     if opts.columns is not None:
         unknown = [name for name in columns(opts) if name not in COLUMNS]
         if unknown or not columns(opts):
             return f"unknown column(s) {','.join(unknown)}: see --columns=help"
-    if opts.global_config and not Path(opts.global_config).is_file():
-        return f"no such config file: {opts.global_config}"
+    for config in (opts.global_config, opts.config):
+        if config and not Path(config).is_file():
+            return f"no such config file: {config}"
     if not target.remote and renovate.passthrough_value(opts.passthrough, "--dry-run") in (
         "",
         "full",
@@ -268,15 +281,20 @@ def check(opts, target: Target) -> str | None:
 
 
 def validate(opts, target: Target, engine: str, image: str) -> int:
-    """renovate-config-validator, on the repository mounted as for a run: it reports the
-    config file by its path in the repository."""
-    config = renovate.find_config_file(target.value)
-    if config is None:
-        log.error("no Renovate config in %s", target.value)
-        return 2
-    fs = container.filesystem(target, None)
+    """renovate-config-validator, on --config or the repository's config. The file is
+    mounted in the working directory, so the validator reports it by the name you know."""
+    if opts.config:
+        config, path = Path(opts.config).resolve(), Path(opts.config).name
+    else:
+        config = renovate.find_config_file(target.value)
+        if config is None:
+            log.error("no Renovate config in %s", target.value)
+            return 2
+        path = str(config.relative_to(target.value))
+    fs = container.Filesystem(
+        [(str(config), f"{container.REPO_MOUNT}/{path}")], container.REPO_MOUNT
+    )
     env = {"NODE_OPTIONS": "--no-deprecation", "LOG_LEVEL": "info"}
-    path = str(config.relative_to(target.value))
     argv = container.command(
         engine, image, fs, env, ["--no-global", path], "renovate-config-validator", opts.name
     )

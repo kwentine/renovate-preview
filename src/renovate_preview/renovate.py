@@ -83,8 +83,8 @@ def passthrough_value(passthrough: list[str], name: str) -> str | None:
     return None
 
 
-def environment(global_config: str | None) -> dict[str, str]:
-    """`global_config`: where Renovate finds the global config file, if there is one."""
+def environment(global_config: str | None, config: str | None, remote: bool) -> dict[str, str]:
+    """`global_config`, `config`: where Renovate finds those files, if there are any."""
     env = {
         "NODE_OPTIONS": "--no-deprecation",
         "LOG_LEVEL": "debug",
@@ -94,6 +94,13 @@ def environment(global_config: str | None) -> dict[str, str]:
     }
     if global_config:
         env["RENOVATE_CONFIG_FILE"] = global_config
+    if config:
+        # Merged over the global config, where the repository's config would come.
+        env["RENOVATE_ADDITIONAL_CONFIG_FILE"] = config
+        if remote:
+            # Don't read the repository's own config at all. The local platform reads it
+            # regardless: it forces requireConfig=optional.
+            env["RENOVATE_REQUIRE_CONFIG"] = "ignored"
     return env
 
 

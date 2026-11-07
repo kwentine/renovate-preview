@@ -15,24 +15,33 @@ from renovate_preview.renovate import Target
 
 
 def run_command(target="/tmp", engine="podman", image="img:tag", env=None, **kw):
-    fs = filesystem(Target.parse(target), kw.pop("global_config", None))
+    fs = filesystem(Target.parse(target), kw.pop("global_config", None), None)
     with mock.patch.dict(os.environ, env or {}, clear=True):
         return command(engine, image, fs, {"LOG_LEVEL": "debug"}, ["--a"], **kw)
 
 
 class FilesystemTests(unittest.TestCase):
     def test_local_repository_is_the_working_directory(self):
-        fs = filesystem(Target(False, "/repo"), None)
+        fs = filesystem(Target(False, "/repo"), None, None)
         self.assertEqual(fs, Filesystem([("/repo", "/usr/src/app")], "/usr/src/app"))
 
     def test_remote_mounts_nothing(self):
-        self.assertEqual(filesystem(Target(True, "o/r"), None), Filesystem())
+        self.assertEqual(filesystem(Target(True, "o/r"), None, None), Filesystem())
 
     def test_global_config_keeps_its_extension(self):
         with tempfile.NamedTemporaryFile(suffix=".json5") as config:
-            fs = filesystem(Target(True, "o/r"), config.name)
+            fs = filesystem(Target(True, "o/r"), config.name, None)
         self.assertEqual(fs.global_config, "/renovate-preview/global.json5")
         self.assertEqual(fs.mounts, [(config.name, "/renovate-preview/global.json5")])
+
+    def test_config(self):
+        with tempfile.NamedTemporaryFile(suffix=".json") as g, tempfile.NamedTemporaryFile() as c:
+            fs = filesystem(Target(True, "o/r"), g.name, c.name)
+        self.assertEqual(
+            (fs.global_config, fs.config),
+            ("/renovate-preview/global.json", "/renovate-preview/config"),
+        )
+        self.assertEqual(len(fs.mounts), 2)
 
 
 class CommandTests(unittest.TestCase):
