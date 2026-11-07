@@ -59,9 +59,7 @@ def table(document: dict, names: list[str]) -> str:
     data = [[title for title, _ in cols]] + [[cell(row, key) for _, key in cols] for row in rows]
     widths = [max(len(line[i]) for line in data) for i in range(len(cols))]
     data.insert(1, ["-" * w for w in widths])
-    return "\n".join(
-        "  ".join(c.ljust(w) for c, w in zip(line, widths, strict=True)).rstrip() for line in data
-    )
+    return "\n".join("  ".join(c.ljust(w) for c, w in zip(line, widths)).rstrip() for line in data)
 
 
 def to_json(document: dict) -> str:

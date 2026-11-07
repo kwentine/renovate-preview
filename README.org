@@ -20,8 +20,7 @@ uv tool install renovate-preview   # or, from a checkout: uv tool install .
 make install                       # or: a launcher in ~/.local/bin running this checkout
 #+end_src
 
-Renovate runs in a container: =podman= or =docker=, whichever is installed. renovate-preview
-never pulls the image: pull it first, and again whenever you want a newer Renovate.
+Renovate runs in a container, using =podman= or =docker= (whichever is installed).
 
 #+begin_src sh
 podman pull ghcr.io/renovatebot/renovate   # or: docker pull ...
@@ -51,6 +50,8 @@ renovate-preview --columns all             # every column; --columns help lists 
 renovate-preview -o json                   # table (default), json, html
 renovate-preview -o html -w report.html    # ... written to a file rather than stdout
 renovate-preview -o raw                    # Renovate's own log; or its report: -o report
+renovate-preview --from last --columns all # the last run again, other columns: no re-run
+renovate-preview --from run.ndjson         # any Renovate JSON log (- for stdin)
 renovate-preview --verbose                 # what Renovate is doing, as it runs
 renovate-preview --silent                  # no progress hints or warnings
 
@@ -110,6 +111,10 @@ On a local repository, =--config= is read too, but the repository's own =renovat
   looked up). Also: =type=, =breaking= (as the versioning scheme says: under semver, any
   0.x change is), =age=, =pending=, =manager=, =datasource=, =versioning=, =branch=, =pr-title=.
   =-o json= always has everything.
+- *=--from last= is the last run only.* Each run keeps its log in
+  =$XDG_STATE_HOME/renovate-preview/last.ndjson= (by default =~/.local/state/...=), readable
+  by you only, replacing the previous one. To keep a run, =-o raw -w FILE=, then
+  =--from FILE=.
 - *Only files known to git are seen.* Renovate lists files with =git ls-files=, so =git add=
   a new manifest before previewing it.
 - *=--except= replaces Renovate's =ignorePaths=.* It becomes =--ignore-paths=, as given,

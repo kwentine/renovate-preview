@@ -1,12 +1,13 @@
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from renovate_preview.cli import columns, main, parse_args
+from renovate_preview.cli import columns, last_run, main, parse_args
 from renovate_preview.render import COLUMNS
 
 
@@ -184,3 +185,78 @@ class PatUrlTests(unittest.TestCase):
     def test_pat_url_on_github_enterprise_server(self):
         _, out, _ = run("--pat-url", "--host", "ghe.example.com")
         self.assertTrue(out.startswith("https://ghe.example.com/settings/"))
+
+
+FIXTURE = Path(__file__).parent / "data" / "release-age.ndjson"
+
+
+class ReplayTests(unittest.TestCase):
+    """--from: a log instead of a run."""
+
+    def test_file(self):
+        code, out, err = run("--from", str(FIXTURE), "--columns", "dependency,new")
+        self.assertEqual(code, 0)
+        self.assertIn(["cert-manager", "v1.21.1"], [line.split() for line in out.splitlines()])
+        self.assertIn(f"Renovate 44.164.10, replayed from {FIXTURE}", err)
+
+    def test_stdin(self):
+        with mock.patch("sys.stdin", io.StringIO(FIXTURE.read_text())):
+            code, out, _ = run("--from", "-", "-o", "json")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["target"], "stdin")
+
+    def test_a_run_is_kept_for_from_last(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            last = Path(tmp, "last.ndjson")
+            with mock.patch("renovate_preview.cli.last_run", return_value=last):
+                with fake_renovate(*LINES):
+                    run(".")
+                self.assertEqual(last.stat().st_mode & 0o777, 0o600)
+                code, out, _ = run("--from", "last", "-o", "raw")
+        self.assertEqual((code, out.splitlines()), (0, list(LINES)))
+
+    def test_last_run_is_xdg_state(self):
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": "/state"}):
+            self.assertEqual(last_run(), Path("/state/renovate-preview/last.ndjson"))
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": "relative", "HOME": "/home/me"}):
+            # Relative values are to be ignored, says the spec.
+            self.assertEqual(
+                last_run(), Path("/home/me/.local/state/renovate-preview/last.ndjson")
+            )
+
+    def test_run_creates_a_private_state_directory(self):
+        with tempfile.TemporaryDirectory() as tmp, fake_renovate(*LINES):
+            run(".", env={"XDG_STATE_HOME": tmp})
+            directory = Path(tmp, "renovate-preview")
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((directory / "last.ndjson").stat().st_mode & 0o777, 0o600)
+
+    def test_no_last_run(self):
+        with mock.patch("renovate_preview.cli.last_run", return_value=Path("/nonexistent")):
+            code, _, err = run("--from", "last")
+        self.assertEqual(code, 2)
+        self.assertIn("(no run yet?)", err)
+
+    def test_not_a_renovate_log(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt") as f:
+            f.write("hello\n")
+            f.flush()
+            code, _, err = run("--from", f.name)
+        self.assertEqual(code, 2)
+        self.assertIn("no Renovate JSON log records", err)
+
+    def test_run_only_options_are_rejected(self):
+        for argv in (
+            [".", "--from", "x"],
+            ["--from", "x", "--extract"],
+            ["--from", "x", "--global-config", "g.json"],
+            ["--from", "x", "--", "--foo"],
+        ):
+            with self.subTest(argv=argv):
+                code, _, err = run(*argv)
+                self.assertEqual(code, 2)
+                self.assertIn("only apply to a run", err)
+
+    def test_global_config_from_the_environment_is_fine(self):
+        code, _, _ = run("--from", str(FIXTURE), env={"RENOVATE_CONFIG_FILE": "g.json"})
+        self.assertEqual(code, 0)

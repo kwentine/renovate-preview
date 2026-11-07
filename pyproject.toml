@@ -10,7 +10,7 @@ description = "Dry-run Renovate against a repository and see what it would do."
 readme = { file = "README.org", content-type = "text/plain" }
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 authors = [{ name = "Quentin Ågren", email = "quentin@scilifelab.se" }]
 keywords = ["renovate", "dependencies", "dry-run", "devops"]
 classifiers = [
@@ -38,7 +38,7 @@ include = ["src/renovate_preview", "tests", "examples", "docs", "README.org", "M
 
 [tool.ruff]
 line-length = 99
-target-version = "py310"
+target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

@@ -26,6 +26,7 @@ examples:
   renovate-preview @owner/repo --config renovate.json   ... with your config instead of its own
   renovate-preview --only base --managers kustomize
   renovate-preview -o html -w report.html read the result in a browser
+  renovate-preview --from last -o json    the last run again, without running Renovate
   renovate-preview --just-print           show the container command, run nothing
   renovate-preview --shell                a shell in the container, set up as for Renovate
   renovate-preview -- --ignore-paths='overlays/**'   pass arguments on to Renovate
@@ -88,6 +89,13 @@ def parser() -> argparse.ArgumentParser:
         metavar="FILE",
         default=os.environ.get("RENOVATE_CONFIG_FILE"),
         help="a self-hosted Renovate global config (default: $RENOVATE_CONFIG_FILE)",
+    )
+    what.add_argument(
+        "--from",
+        dest="source",
+        metavar="LOG",
+        help="replay a Renovate JSON log instead of running: a file, - for stdin, "
+        "or 'last' for the previous run",
     )
     what.add_argument(
         "--config",
@@ -185,6 +193,8 @@ def preview(opts: argparse.Namespace) -> int:
     if opts.columns == "help":
         print(columns_help())
         return 0
+    if opts.source:
+        return replay(opts)
     target = Target.parse(opts.repository)
     if error := check(opts, target):
         log.error(error)
@@ -237,13 +247,92 @@ def preview(opts: argparse.Namespace) -> int:
         )
         return status
 
+    keep_last_run(lines)
     document = summarize(opts.repository or target.value, records)
+    return show(opts, document, lines, records, status)
+
+
+def show(opts, document: dict, lines: list[str], records: list[dict], status: int) -> int:
+    """The output, and what Renovate had to say: the same for a run and a replay."""
     write(render(opts, document, lines, records), opts.write)
     if document["problems"]:
         log.warning("Renovate reported:\n  %s", "\n  ".join(document["problems"][:10]))
     if status != 0:
         log.error("renovate exited with status %s; see its whole log with -o raw", status)
     return status
+
+
+def last_run() -> Path:
+    """Where each run keeps its log, for --from last: the last one only. Logs are "state"
+    in the XDG Base Directory spec, whose variables are ignored unless absolute:
+    https://specifications.freedesktop.org/basedir-spec/latest/"""
+    state = os.environ.get("XDG_STATE_HOME", "")
+    base = Path(state) if os.path.isabs(state) else Path.home() / ".local" / "state"
+    return base / "renovate-preview" / "last.ndjson"
+
+
+def keep_last_run(lines: list[str]) -> None:
+    # Readable by the user only: a debug log shows configuration and URLs, and a home
+    # directory isn't always private.
+    path = last_run()
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        with os.fdopen(os.open(path, flags, 0o600), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as err:
+        log.warning("could not keep this run for --from last: %s", err)
+
+
+def replay(opts) -> int:
+    """--from: a log instead of a run, rendered as a run would be."""
+    if error := check_replay(opts):
+        log.error(error)
+        return 2
+    if opts.source == "-":
+        label, text = "stdin", sys.stdin.read()
+    else:
+        path = last_run() if opts.source == "last" else Path(opts.source)
+        label = "last run" if opts.source == "last" else opts.source
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as err:
+            hint = " (no run yet?)" if opts.source == "last" else ""
+            log.error("cannot read %s%s: %s", path, hint, err.strerror)
+            return 2
+    lines = text.splitlines()
+    records = [r for r in map(parse_record, lines) if r is not None]
+    if not records:
+        log.error("no Renovate JSON log records in %s", label)
+        return 2
+    document = summarize(label, records)
+    log.info("Renovate %s, replayed from %s", document["renovate_version"] or "?", label)
+    return show(opts, document, lines, records, status=0)
+
+
+def check_replay(opts) -> str | None:
+    """What only applies to a run is an error with --from, rather than silently ignored."""
+    given = {
+        "a repository": opts.repository,
+        "--extract": opts.extract,
+        "--validate": opts.validate,
+        "--only": opts.only,
+        "--except": opts.excluded,
+        "--managers": opts.managers,
+        "--config": opts.config,
+        "--global-config": opts.global_config
+        not in (None, os.environ.get("RENOVATE_CONFIG_FILE")),
+        "--host": opts.host != GITHUB,
+        "--image": opts.image != IMAGE,
+        "--tag": opts.tag != TAG,
+        "--name": opts.name,
+        "--shell": opts.shell,
+        "--just-print": opts.just_print,
+        "arguments after --": opts.passthrough,
+    }
+    if run_only := [name for name, value in given.items() if value]:
+        return f"--from replays a log: {', '.join(run_only)} only apply to a run"
+    return None
 
 
 def last_line(lines: list[str]) -> str:
