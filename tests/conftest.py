@@ -18,6 +18,8 @@ DATA = Path(__file__).parent / "data"
 LOOKUP = DATA / "lookup.ndjson"
 # A real run with minimumReleaseAge (Renovate 44.164.10, October 2026).
 RELEASE_AGE = DATA / "release-age.ndjson"
+# A run on a renovate.json with two invalid options (Renovate 44.225.2), trimmed.
+INVALID_CONFIG = DATA / "invalid-config.ndjson"
 
 
 def records(path: Path) -> list[dict]:
@@ -36,7 +38,7 @@ def release_age() -> dict:
 
 @pytest.fixture(autouse=True)
 def fresh_logger():
-    """main() sets our logger up, on the stderr of its time: undo it after each test."""
+    """Undo main()'s logging setup after each test: it is bound to that test's stderr."""
     yield
     logger = logging.getLogger("renovate_preview")
     logger.handlers, logger.propagate = [], True
@@ -45,15 +47,19 @@ def fresh_logger():
 
 @pytest.fixture
 def run(capsys, tmp_path):
-    """renovate-preview's command line: run(*argv, env={...}) -> (status, stdout, stderr).
+    """Return a function that runs our command line: (status, stdout, stderr).
 
-    In an environment holding only `env`, and with the last run kept under tmp_path rather
-    than in your home directory."""
+    It runs in an environment holding only `env`, and with the last run kept under
+    tmp_path rather than in your home directory.
+    """
 
     def run(*argv: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
         environ = {"XDG_STATE_HOME": str(tmp_path / "state"), **(env or {})}
         with mock.patch.dict(os.environ, environ, clear=True):
-            status = main(list(argv))
+            try:
+                status = main(list(argv))
+            except SystemExit as exit:  # argparse's errors, --help and --version
+                status = exit.code
         out, err = capsys.readouterr()
         return status, out, err
 
@@ -62,7 +68,7 @@ def run(capsys, tmp_path):
 
 @pytest.fixture
 def renovate(monkeypatch):
-    """Stands in for the container: renovate(*lines, status=0) makes it output `lines`."""
+    """Return a function that makes the container output `lines` and exit with `status`."""
 
     def renovate(*lines: str, status: int = 0) -> None:
         def fake(argv, on_line):

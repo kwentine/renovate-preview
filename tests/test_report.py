@@ -2,6 +2,8 @@ import pytest
 
 from renovate_preview.report import dependency_rows, parse_record, sort_key, summarize
 
+from .conftest import INVALID_CONFIG, records
+
 # The report of a real Renovate 44 run of examples/separate-multiple-minor: `lookup`.
 
 
@@ -17,6 +19,13 @@ def test_run_facts(lookup):
     assert lookup["renovate_version"] == "44.115.10"
     assert lookup["files_scanned"] == 1
     assert lookup["problems"] == ["WARN: Package lookup failures"]
+
+
+def test_invalid_config_says_why():
+    assert summarize("x", records(INVALID_CONFIG))["problems"] == [
+        "WARN: Repository has invalid config: renovate.json: Invalid configuration option: foo, "
+        "Invalid configuration option: packageRules[0].bogus"
+    ]
 
 
 def test_no_report():
@@ -61,7 +70,7 @@ def test_pr_titles_come_from_branches():
 
 @pytest.fixture
 def rows(release_age):
-    """The rows by the dependency's short name."""
+    """Return the rows by the dependency's short name."""
     return {row["dependency"].rsplit("/", 1)[-1]: row for row in release_age["updates"]}
 
 

@@ -1,32 +1,20 @@
-import os
-from pathlib import Path
-from unittest import mock
-
 from renovate_preview.cli import parse_args
 from renovate_preview.renovate import (
-    Target,
-    arguments,
+    container_args,
+    credentials_warning,
     environment,
-    forwarded_environment,
-    passthrough_value,
+    forwarded,
+    inside,
+    their_flags,
 )
 
 
-def args(*argv, env=None):
-    opts = parse_args(list(argv))
-    with mock.patch.dict(os.environ, env or {}, clear=True):
-        return arguments(opts, Target.parse(opts.repository))
+def args(*argv):
+    return container_args(*parse_args(list(argv)))
 
 
-# Target
-
-
-def test_remote_target():
-    assert Target.parse("@org/repo") == Target(True, "org/repo")
-
-
-def test_local_target_defaults_to_the_current_directory():
-    assert Target.parse(None) == Target(False, str(Path.cwd()))
+def opts(*argv):
+    return parse_args(list(argv))[0]
 
 
 # Arguments
@@ -43,7 +31,12 @@ def test_scope():
 
 def test_remote():
     assert args("@org/repo")[-2:] == ["--platform=github", "org/repo"]
-    assert args("@o/r", env={"RENOVATE_PLATFORM": "gitlab"})[-2:] == ["--platform=gitlab", "o/r"]
+
+
+def test_other_platforms_are_arguments():
+    argv = args("@o/r", "--", "--platform=gitlab", "--endpoint=https://gitlab.example.com/")
+    assert "--platform=github" not in argv
+    assert argv[-3:] == ["--platform=gitlab", "--endpoint=https://gitlab.example.com/", "o/r"]
 
 
 def test_github_enterprise_server():
@@ -56,7 +49,7 @@ def test_github_enterprise_server():
 # Arguments after `--` win: over ours, and (with --force-cli) over the repository config.
 
 
-def test_passthrough_comes_after_ours_with_force_cli():
+def test_theirs_come_after_ours_with_force_cli():
     assert args("/tmp", "--", "--ignore-paths=x") == [
         "--report-type=logging",
         "--dry-run=lookup",
@@ -66,7 +59,7 @@ def test_passthrough_comes_after_ours_with_force_cli():
     ]
 
 
-def test_no_force_cli_without_passthrough():
+def test_no_force_cli_without_theirs():
     assert "--force-cli=true" not in args("/tmp")
 
 
@@ -81,38 +74,49 @@ def test_remote_repository_stays_last():
     assert args("@o/r", "--", "--foo")[-2:] == ["--foo", "o/r"]
 
 
-def test_passthrough_value():
-    assert passthrough_value(["--dry-run=full"], "--dry-run") == "full"
-    assert passthrough_value(["--dry-run", "full"], "--dry-run") == "full"
-    assert passthrough_value(["--dry-run", "--x"], "--dry-run") == ""
-    assert passthrough_value(["--dry-runs=1"], "--dry-run") is None
+def test_their_flags():
+    assert their_flags(["--dry-run=full"]).dry_run == "full"
+    assert their_flags(["--x", "--dry-run", "full", "y"]).dry_run == "full"
+    assert their_flags(["--dry-run"]).dry_run is None  # Renovate rejects it
+    assert their_flags(["--dry-runs=1", "--dry"]).dry_run is None
 
 
 # Environment
 
 
+def test_inside_keeps_the_extension():
+    assert inside("global", "/a/b.json5") == "/renovate-preview/global.json5"
+    assert inside("config", "c") == "/renovate-preview/config"
+
+
 def test_renovate_defaults_for_require_config():
-    assert "RENOVATE_REQUIRE_CONFIG" not in environment(None, None, remote=True)
+    assert "RENOVATE_REQUIRE_CONFIG" not in environment(opts("@o/r"))
 
 
 def test_global_config():
-    assert "RENOVATE_CONFIG_FILE" not in environment(None, None, False)
-    assert environment("/g.json", None, False)["RENOVATE_CONFIG_FILE"] == "/g.json"
+    assert "RENOVATE_CONFIG_FILE" not in environment(opts())
+    env = environment(opts("--global-config", "g.json"))
+    assert env["RENOVATE_CONFIG_FILE"] == "/renovate-preview/global.json"
 
 
 def test_config_replaces_the_repository_config_remotely():
-    env = environment(None, "/c.json", remote=True)
-    assert env["RENOVATE_ADDITIONAL_CONFIG_FILE"] == "/c.json"
+    env = environment(opts("@o/r", "--config", "c.json"))
+    assert env["RENOVATE_ADDITIONAL_CONFIG_FILE"] == "/renovate-preview/config.json"
     assert env["RENOVATE_REQUIRE_CONFIG"] == "ignored"
 
 
 def test_config_locally():
-    env = environment(None, "/c.json", remote=False)
-    assert env["RENOVATE_ADDITIONAL_CONFIG_FILE"] == "/c.json"
+    env = environment(opts("--config", "c.json"))
+    assert env["RENOVATE_ADDITIONAL_CONFIG_FILE"] == "/renovate-preview/config.json"
     assert "RENOVATE_REQUIRE_CONFIG" not in env
 
 
-def test_forwarded_by_name():
-    env = {"RENOVATE_TOKEN": "x", "GITHUB_COM_TOKEN": "y", "RENOVATE_PREVIEW_RUNTIME": "z"}
-    with mock.patch.dict(os.environ, env, clear=True):
-        assert forwarded_environment() == ["GITHUB_COM_TOKEN", "RENOVATE_TOKEN"]
+def test_forwarded_tokens_and_env_when_set():
+    environ = {"RENOVATE_TOKEN": "x", "GITHUB_COM_TOKEN": "y", "RENOVATE_PLATFORM": "z", "A": ""}
+    assert forwarded(opts(), environ) == ["RENOVATE_TOKEN", "GITHUB_COM_TOKEN"]
+    assert forwarded(opts("--env", "A", "--env", "B"), environ)[-1] == "A"
+
+
+def test_credentials_warning():
+    assert "GitHub rate-limits" in credentials_warning({})
+    assert credentials_warning({"GITHUB_COM_TOKEN": "y"}) is None

@@ -22,7 +22,7 @@ PHASES = {
 
 
 def parse_record(line: str) -> dict | None:
-    """A JSON log record, or None for the plain text Renovate interleaves with them."""
+    """Return a JSON log record, or None for the plain text Renovate interleaves."""
     if not line.startswith("{"):
         return None
     try:
@@ -37,7 +37,7 @@ def level(record: dict) -> str:
 
 
 def raw_report(records: list[dict]) -> dict | None:
-    """Renovate's report, as it printed it."""
+    """Return Renovate's report, as it printed it."""
     for record in records:
         if record.get("msg") == "Printing report" and isinstance(record.get("report"), dict):
             return record["report"]
@@ -45,7 +45,7 @@ def raw_report(records: list[dict]) -> dict | None:
 
 
 def summarize(target: str, records: list[dict]) -> dict:
-    """The document every output format renders."""
+    """Return the document every output format renders."""
     report, version, stats, problems = None, None, None, []
     for record in records:
         msg = record.get("msg")
@@ -57,6 +57,11 @@ def summarize(target: str, records: list[dict]) -> dict:
             stats = (record.get("stats") or {}).get("total")
         if record.get("level", 0) >= 40:
             problem = f"{level(record).upper()}: {msg}"
+            # An invalid repository config stops the run: "Repository has invalid config",
+            # and why, in the error.
+            err = record.get("err") or {}
+            if err.get("validationMessage"):
+                problem += f": {err.get('validationSource')}: {err['validationMessage'].strip()}"
             if problem not in problems:
                 problems.append(problem)
 
@@ -90,8 +95,11 @@ def summarize(target: str, records: list[dict]) -> dict:
 
 
 def sort_key(row: dict) -> tuple:
-    """By dependency, then the new version's age (youngest first, unknown last), then the
-    file. The sort is stable: rows still tied stay in Renovate's order."""
+    """Sort by dependency, then the new version's age, then the file.
+
+    Youngest first, unknown age last. The sort is stable: rows still tied stay in
+    Renovate's order.
+    """
     age = row["age_days"]
     return (str(row["dependency"] or "").lower(), age is None, age or 0, row["file"] or "")
 
@@ -109,7 +117,7 @@ UPDATE_KEYS = (
 
 
 def dependency_rows(manager: str, package_file: dict) -> list[dict]:
-    """One row per dependency, or one per available update when there are some."""
+    """Return one row per dependency, or one per available update when there are some."""
     rows = []
     for dep in package_file.get("deps") or []:
         current = dep.get("currentValue") or dep.get("currentVersion")

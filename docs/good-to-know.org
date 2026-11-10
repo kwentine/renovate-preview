@@ -1,0 +1,77 @@
+#+TITLE: Good to know
+#+OPTIONS: toc:nil num:nil
+
+What can surprise you in a preview, and why.
+
+* What Renovate sees
+
+** Only files known to git
+Renovate lists files with =git ls-files=, so =git add= a new manifest before previewing it.
+
+** Limiting the paths: =--include-paths= and =--ignore-paths=
+Both go after =--=, and they match differently.
+
+- =--include-paths= matches whole paths, or globs. A directory needs a glob: =base/**=. A
+  bare =base= only matches a /file/ named =base=, so nothing is scanned.
+- =--ignore-paths= matches any path /containing/ what you give, or a glob: =base= also
+  ignores =database/=.
+- =--ignore-paths= also /replaces/ Renovate's =ignorePaths=: its defaults
+  (=**/node_modules/**=...), your =renovate.json='s list, and its presets'. List what you
+  still want ignored, or use =--include-paths= instead. See
+  [[file:../examples/preset-extends/][examples/preset-extends]].
+
+* What the preview shows
+
+** No PR titles for a local repository
+Renovate's local platform stops after version lookups. It silently turns
+=--dry-run=full= into =lookup=, so renovate-preview refuses it. Branch names are known,
+PR titles are not. Against =@owner/repo= the dry run is complete, titles included.
+
+** Columns
+| Column       | Shows                                                                   |
+|--------------+-------------------------------------------------------------------------|
+| =dependency= | the dependency's name (default)                                         |
+| =current=    | its current version (default)                                           |
+| =new=        | the update's version (default, unless =--extract=)                      |
+| =type=       | major, minor, patch, digest...                                          |
+| =breaking=   | as its versioning scheme says: under semver, any 0.x change is breaking |
+| =age=        | the new version's age (see below)                                       |
+| =pending=    | what waits for its checks (see below)                                   |
+| =manager=    | the Renovate manager that found it                                      |
+| =datasource= | where its versions are looked up                                        |
+| =versioning= | its versioning scheme                                                   |
+| =file=       | the file it's in (default)                                              |
+| =branch=     | the branch Renovate would create                                        |
+| =pr-title=   | the pull request's title (=@owner/repo= only)                           |
+
+Choose them with =--columns=; =--columns help= lists them. =-o json= always has everything.
+
+** AGE and PENDING: =minimumReleaseAge=
+- *AGE* is the new version's age. It's empty when the registry gives no release date:
+  many container registries don't. Renovate then can't check =minimumReleaseAge=, and by
+  default holds the update back.
+- *PENDING* is =yes= when the update itself waits for its checks. Otherwise, it names the
+  newest version held back, like the Pending column of Renovate's PRs.
+
+=-o html= highlights both.
+
+* The config
+
+** Every run validates the repository's config
+If it is invalid, Renovate stops, and the reason shows under "Renovate reported". To run
+Renovate's validator yourself, from =renovate-preview --shell=:
+
+#+begin_src sh
+LOG_FORMAT= LOG_LEVEL=info renovate-config-validator --no-global renovate.json
+#+end_src
+
+=LOG_FORMAT== is there because the shell has renovate-preview's =LOG_FORMAT=json=.
+
+Which configuration wins, and why: [[file:configuration.org][configuration.org]].
+
+* Runs and their logs
+
+** =--from last= is the last run only
+Each run keeps its log in =$XDG_STATE_HOME/renovate-preview/last.ndjson= (by default
+=~/.local/state/...=). It is readable by you only, and replaces the previous one. To keep
+a run: =-o raw -w FILE=, then =--from FILE=.

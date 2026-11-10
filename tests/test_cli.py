@@ -1,16 +1,14 @@
 import io
 import json
-import os
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from renovate_preview.cli import check, columns, last_run, parse_args
+from renovate_preview.cli import check, last_run, parse_args
 from renovate_preview.render import COLUMNS
-from renovate_preview.renovate import Target
 
-from .conftest import RELEASE_AGE
+from .conftest import INVALID_CONFIG, RELEASE_AGE
 
 REPORT = '{"level":30,"msg":"Printing report","report":{"problems":[],"repositories":{}}}'
 LINES = (
@@ -23,9 +21,16 @@ LINES = (
 
 
 def test_everything_after_double_dash_is_passed_through():
-    opts = parse_args(["repo", "--", "--foo", "--", "bar"])
+    opts, theirs = parse_args(["repo", "--", "--foo", "--", "bar"])
     assert opts.repository == "repo"
-    assert opts.passthrough == ["--foo", "--", "bar"]
+    assert theirs == ["--foo", "--", "bar"]
+
+
+def test_the_repository_is_resolved_once():
+    opts, _ = parse_args(["@o/r"])
+    assert (opts.remote, opts.directory) == ("o/r", None)
+    opts, _ = parse_args([])
+    assert (opts.remote, opts.directory) == (None, str(Path.cwd()))
 
 
 @pytest.mark.parametrize(
@@ -35,11 +40,11 @@ def test_everything_after_double_dash_is_passed_through():
         ["--host", "ghe.example.com", "."],
         ["--columns", "dependency,nope"],
         ["--columns", ","],
-        ["--validate", "@o/r"],
         ["--global-config", "/no/such/file"],
         ["/no/such/directory"],
         [".", "--", "--dry-run=full"],
-        [".", "--", "--dry-run"],
+        [".", "--", "--dry-run", "full"],
+        ["--env", "TOKEN=secret"],
     ],
 )
 def test_contradictions_are_rejected(run, argv):
@@ -61,7 +66,7 @@ def test_columns_help(run):
 
 
 def test_columns_all():
-    assert columns(parse_args(["--columns=all"])) == list(COLUMNS)
+    assert parse_args(["--columns=all"])[0].columns == list(COLUMNS)
 
 
 def test_full_dry_run_is_fine_remotely(run):
@@ -74,19 +79,44 @@ def test_remote_needs_a_token(run):
     assert "RENOVATE_TOKEN" in err
 
 
-def test_validating_a_config_needs_no_token(tmp_path):
-    config = tmp_path / "renovate.json"
+def test_check_returns_errors_and_warnings():
+    opts, theirs = parse_args(["@o/r", "--env", "X"])
+    errors, warnings = check(opts, theirs, {})
+    assert errors == ["RENOVATE_TOKEN must be set to reach a remote repository (see --pat-url)"]
+    assert warnings[0] == "--env X: not set"
+    assert "GitHub rate-limits" in warnings[1]
+
+
+def test_every_error_is_reported(run):
+    _, _, err = run("/no/such/directory", "--host", "ghe.example.com", "--just-print")
+    assert "no such directory" in err
+    assert "--host goes with a remote repository" in err
+
+
+def test_global_config(run, tmp_path):
+    config = tmp_path / "global.json"
     config.write_text("{}")
-    opts = parse_args(["@o/r", "--validate", "--config", str(config)])
-    assert check(opts, Target(True, "o/r")) is None
+    _, out, _ = run(".", "--just-print", "--global-config", str(config))
+    assert f"{config}:/renovate-preview/global.json:ro,z" in out
+    assert "RENOVATE_CONFIG_FILE=/renovate-preview/global.json" in out
 
 
-def test_global_config_defaults_to_renovate_config_file(run, tmp_path):
+def test_global_config_is_not_read_from_the_environment(run, tmp_path):
     config = tmp_path / "global.json"
     config.write_text("{}")
     _, out, _ = run(".", "--just-print", env={"RENOVATE_CONFIG_FILE": str(config)})
-    assert f"{config}:/renovate-preview/global.json:ro,z" in out
-    assert "RENOVATE_CONFIG_FILE=/renovate-preview/global.json" in out
+    assert "global.json" not in out
+
+
+def test_only_tokens_are_forwarded_and_env_adds_more(run):
+    env = {"RENOVATE_TOKEN": "t", "RENOVATE_PLATFORM": "gitlab", "REGISTRY_PASSWORD": "p"}
+    _, out, _ = run(".", "--just-print", env=env)
+    _, more, err = run(".", "--just-print", "--env", "REGISTRY_PASSWORD", "--env", "X", env=env)
+    assert "-e RENOVATE_TOKEN \\" in out
+    assert "RENOVATE_PLATFORM" not in out
+    assert "REGISTRY_PASSWORD" not in out
+    assert "-e REGISTRY_PASSWORD \\" in more
+    assert "--env X: not set" in err
 
 
 # --config
@@ -115,12 +145,13 @@ def test_config_locally_warns_that_the_repository_config_wins(run, tmp_path):
     assert "wins over --config" not in without_own
 
 
-def test_validate_shows_the_file_name(run, tmp_path):
-    config = tmp_path / "pr.json5"
-    config.write_text("{}")
-    _, out, _ = run("@o/r", "--validate", "--config", str(config), "--just-print")
-    assert f"{config}:/usr/src/app/pr.json5:ro,z" in out
-    assert out.rstrip().endswith("--no-global pr.json5")
+def test_an_invalid_config_is_shown(run, renovate):
+    renovate(*INVALID_CONFIG.read_text().splitlines())
+    _, _, err = run()
+    assert (
+        "WARN: Repository has invalid config: renovate.json: Invalid configuration option: "
+        "foo, Invalid configuration option: packageRules[0].bogus"
+    ) in err
 
 
 # --just-print
@@ -169,12 +200,27 @@ def test_version_is_shown(run, renovate):
 
 
 def test_missing_image(run, renovate):
-    engine_error = "Error: ghcr.io/renovatebot/renovate:latest: image not known"
-    renovate(engine_error, status=125)
+    # The engine's message goes to the terminal, not through us: only its status does.
+    renovate(status=125)
     status, out, err = run(".", "--silent")
     assert (status, out) == (125, "")
-    assert f"the container did not start: {engine_error}" in err
+    assert "podman could not run Renovate (status 125)" in err
     assert "podman pull ghcr.io/renovatebot/renovate:latest" in err
+
+
+def test_renovate_stops_before_its_report(run, renovate):
+    # E.g. an unknown option: Renovate logs that it started, then the error goes to stderr.
+    renovate(LINES[0], status=1)
+    status, out, err = run(".", "--", "--x")
+    assert (status, out) == (1, "")
+    assert "Renovate stopped before its report (status 1)" in err
+
+
+def test_raw_and_json_output_need_no_report(run, renovate):
+    renovate(LINES[0], status=1)
+    assert run(".", "-o", "raw")[1] == LINES[0] + "\n"
+    status, out, _ = run(".", "-o", "json")
+    assert (status, json.loads(out)["renovate_version"]) == (1, None)
 
 
 def test_failure_points_to_the_raw_log(run, renovate):
@@ -228,17 +274,24 @@ def test_a_run_is_kept_for_from_last(run, renovate, tmp_path):
 
 
 def test_last_run_is_xdg_state():
-    with mock.patch.dict(os.environ, {"XDG_STATE_HOME": "/state"}):
-        assert last_run() == Path("/state/renovate-preview/last.ndjson")
-    with mock.patch.dict(os.environ, {"XDG_STATE_HOME": "relative", "HOME": "/home/me"}):
-        # Relative values are to be ignored, says the spec.
-        assert last_run() == Path("/home/me/.local/state/renovate-preview/last.ndjson")
+    assert last_run({"XDG_STATE_HOME": "/state"}) == Path("/state/renovate-preview/last.ndjson")
+    # Relative values are to be ignored, says the spec.
+    environ = {"XDG_STATE_HOME": "relative", "HOME": "/home/me"}
+    assert last_run(environ) == Path("/home/me/.local/state/renovate-preview/last.ndjson")
 
 
 def test_no_last_run(run):
     status, _, err = run("--from", "last")
     assert status == 2
     assert "(no run yet?)" in err
+
+
+def test_a_log_without_report(run, tmp_path):
+    log = tmp_path / "log.ndjson"
+    log.write_text(LINES[0] + "\n")
+    status, _, err = run("--from", str(log))
+    assert status == 1
+    assert "Renovate stopped before its report;" in err
 
 
 def test_not_a_renovate_log(run, tmp_path):
@@ -256,14 +309,10 @@ def test_not_a_renovate_log(run, tmp_path):
         ["--from", "x", "--extract"],
         ["--from", "x", "--global-config", "g.json"],
         ["--from", "x", "--", "--foo"],
+        ["--from", "x", "--env", "X"],
     ],
 )
 def test_run_only_options_are_rejected_with_from(run, argv):
     status, _, err = run(*argv)
     assert status == 2
-    assert "only apply to a run" in err
-
-
-def test_global_config_from_the_environment_is_fine_with_from(run):
-    status, _, _ = run("--from", str(RELEASE_AGE), env={"RENOVATE_CONFIG_FILE": "g.json"})
-    assert status == 0
+    assert "--from shows a saved log instead of running Renovate" in err

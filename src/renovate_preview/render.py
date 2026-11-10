@@ -24,7 +24,7 @@ COLUMNS = {
 
 
 def default_columns(extract: bool) -> list[str]:
-    """With --extract there are no versions to look up, so no NEW."""
+    """Return the default columns: no NEW with --extract, which looks no versions up."""
     return ["dependency", "current", *([] if extract else ["new"]), "file"]
 
 
@@ -41,8 +41,11 @@ def cell(row: dict, key: str) -> str:
 
 
 def pending(row: dict) -> str:
-    """Like the Pending column of Renovate's PRs: "yes" when this update itself waits for
-    its checks (e.g. minimumReleaseAge), else the newest version held back, if any."""
+    """Return the PENDING cell, like the Pending column of Renovate's PRs.
+
+    "yes" when this update itself waits for its checks (e.g. minimumReleaseAge), else the
+    newest version held back, if any.
+    """
     if row["pending_checks"]:
         return "yes"
     held = row["pending_versions"] or []
@@ -115,7 +118,7 @@ def esc(value) -> str:
 
 
 def html_page(document: dict, names: list[str]) -> str:
-    """The whole result as one self-contained page: no network, opens straight off disk."""
+    """Return the whole result as one self-contained page: no network, opens off disk."""
     rows = document["updates"]
     cols = [COLUMNS[name] for name in names]
     head = "".join(f"<th>{esc(title)}</th>" for title, _ in cols)

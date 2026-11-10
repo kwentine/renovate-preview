@@ -52,7 +52,6 @@ renovate-preview @owner/repo --config renovate.json   # ... with your config ins
 renovate-preview --pat-url                 # a link to create that token: read-only, pre-filled
 
 renovate-preview --extract                 # only the dependencies found: fast, offline
-renovate-preview --validate                # only validate the config
 
 # Arguments after -- go to Renovate, for example:
 renovate-preview -- --include-paths='base/**'       # limit to some paths
@@ -82,13 +81,27 @@ clear them: `podman volume rm renovate-preview`.
 
 ## Environment
 
-These variables are forwarded to Renovate:
+Renovate gets these variables of yours, by name, so their values never show in the
+command:
 
-| Variable                                        | What for                                                            |
-|-------------------------------------------------|---------------------------------------------------------------------|
-| `RENOVATE_TOKEN`                                | GitHub token. Required for `@owner/repo`.                           |
-| `RENOVATE_GITHUB_COM_TOKEN`, `GITHUB_COM_TOKEN` | Authenticates version lookups on github.com, avoiding rate limits.  |
-| `RENOVATE_PLATFORM`, `RENOVATE_ENDPOINT`        | For `@owner/repo` on GitLab, Forgejo...                             |
+| Variable                                        | What for                                                           |
+|-------------------------------------------------|--------------------------------------------------------------------|
+| `RENOVATE_TOKEN`                                | GitHub token. Required for `@owner/repo`.                          |
+| `RENOVATE_GITHUB_COM_TOKEN`, `GITHUB_COM_TOKEN` | Authenticates version lookups on github.com, avoiding rate limits. |
+
+No other variable reaches Renovate unless you name it with `--env NAME`, for example a
+private registry's credentials, as Renovate
+[reads them from the environment](https://docs.renovatebot.com/self-hosted-configuration/#detecthostrulesfromenv):
+
+```sh
+renovate-preview --env DOCKER_REGISTRY_EXAMPLE_COM_USERNAME --env DOCKER_REGISTRY_EXAMPLE_COM_PASSWORD
+```
+
+Renovate's settings are its arguments, after `--`. For example, `@owner/repo` on GitLab:
+
+```sh
+renovate-preview @owner/repo -- --platform=gitlab --endpoint=https://gitlab.example.com/api/v4/
+```
 
 ## Configuration
 
@@ -113,41 +126,13 @@ takes precedence.
 
 ## Good to know
 
-- **No PR titles for a local repository.** Renovate's local platform stops after version
-  lookups (it silently turns `--dry-run=full` into `lookup`, so renovate-preview refuses
-  it): branch names are known, PR titles are not. Against `@owner/repo` the dry run is
-  complete.
-- **AGE and PENDING come from `minimumReleaseAge`.** AGE is the new version's age, empty
-  when the registry gives no release date (many container registries don't). Renovate then
-  can't check `minimumReleaseAge`, and by default holds the update back. PENDING is `yes`
-  when the update itself waits for its checks, or names the newest version held back, like
-  the Pending column of Renovate's PRs. Show them with `--columns`; `-o html` highlights
-  both.
-- **Columns**: `dependency`, `current`, `new`, `file` by default (`new` only when versions
-  are looked up). Also: `type`, `breaking` (as the versioning scheme says: under semver,
-  any 0.x change is), `age`, `pending`, `manager`, `datasource`, `versioning`, `branch`,
-  `pr-title`. `-o json` always has everything.
-- **`--from last` is the last run only.** Each run keeps its log in
-  `$XDG_STATE_HOME/renovate-preview/last.ndjson` (by default `~/.local/state/...`),
-  readable by you only, replacing the previous one. To keep a run: `-o raw -w FILE`, then
-  `--from FILE`.
-- **Only files known to git are seen.** Renovate lists files with `git ls-files`, so
-  `git add` a new manifest before previewing it.
-- **`--ignore-paths` replaces Renovate's `ignorePaths`.** Passed after `--`, it replaces
-  everything configured: Renovate's defaults (`**/node_modules/**`...), your
-  `renovate.json`'s list, and its presets'. List what you still want ignored, or use
-  `--include-paths`. See
-  [examples/preset-extends](https://github.com/kwentine/renovate-preview/tree/main/examples/preset-extends).
-- **`--include-paths` needs a glob for a directory: `base/**`.** A bare `base` only matches
-  a *file* named `base`, so nothing is scanned. (`--ignore-paths`, by contrast, matches any
-  path *containing* what you give: `base` also ignores `database/`.)
+For trivia about what can surprise you and why, see: [docs/good-to-know.org](https://github.com/kwentine/renovate-preview/blob/main/docs/good-to-know.org).
 
 ## With renovate-pretty-log
 
 [renovate-pretty-log](https://gitlab.com/tanna.dev/renovate-pretty-log) is for exploring a
 Renovate debug log: a colourised printer, an HTML report, and a TUI with folding and
-search. It reads the log of any Renovate run, including the ones your production instance
-writes.
+search.
 
 renovate-preview comes before the log. It runs Renovate for you, with the settings a
 preview needs, and answers one question: which dependencies were found, and which updates

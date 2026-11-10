@@ -17,7 +17,7 @@ SHEBANG = re.compile(r':shebang "([^"]+)"')
 
 
 def blocks():
-    """(page, the tangled file's path, what the block says it holds)"""
+    """Yield (page, the tangled file's path, what the block says it holds)."""
     for page in sorted(DOCS.glob("*.org")):
         for match in BLOCK.finditer(page.read_text()):
             path, body = match.groups()
