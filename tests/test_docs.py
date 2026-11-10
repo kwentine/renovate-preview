@@ -5,8 +5,9 @@ After editing a block, re-tangle: C-c C-v t in Emacs, or
 """
 
 import re
-import unittest
 from pathlib import Path
+
+import pytest
 
 DOCS = Path(__file__).parent.parent / "docs"
 BLOCK = re.compile(
@@ -15,13 +16,16 @@ BLOCK = re.compile(
 SHEBANG = re.compile(r':shebang "([^"]+)"')
 
 
-class TangleTests(unittest.TestCase):
-    def test_tangled_files_match_their_blocks(self):
-        for page in DOCS.glob("*.org"):
-            text = page.read_text()
-            for match in BLOCK.finditer(text):
-                path, body = match.groups()
-                shebang = SHEBANG.search(match.group(0).splitlines()[0])
-                expected = (shebang.group(1) + "\n" if shebang else "") + body
-                with self.subTest(file=path):
-                    self.assertEqual((page.parent / path).read_text(), expected)
+def blocks():
+    """(page, the tangled file's path, what the block says it holds)"""
+    for page in sorted(DOCS.glob("*.org")):
+        for match in BLOCK.finditer(page.read_text()):
+            path, body = match.groups()
+            shebang = SHEBANG.search(match.group(0).splitlines()[0])
+            expected = (shebang.group(1) + "\n" if shebang else "") + body
+            yield pytest.param(page, path, expected, id=f"{page.name}:{path}")
+
+
+@pytest.mark.parametrize(("page", "path", "expected"), list(blocks()))
+def test_tangled_files_match_their_blocks(page, path, expected):
+    assert (page.parent / path).read_text() == expected

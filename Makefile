@@ -31,10 +31,10 @@ uninstall:
 	rm -f $(TARGET)
 
 test:
-	$(PYTHON) -m unittest discover -s tests -t . -q
+	$(PYTHON) -m pytest -q
 
 examples:
-	RENOVATE_PREVIEW_E2E=1 $(PYTHON) -m unittest tests.test_examples -v
+	RENOVATE_PREVIEW_E2E=1 $(PYTHON) -m pytest tests/test_examples.py -v
 
 lint:
 	ruff check src tests && ruff format --check src tests

@@ -8,8 +8,9 @@ import contextlib
 import io
 import json
 import os
-import unittest
 from pathlib import Path
+
+import pytest
 
 from renovate_preview.cli import main
 
@@ -17,28 +18,29 @@ EXAMPLES = Path(__file__).parent.parent / "examples"
 FIELDS = ("dependency", "current", "manager", "file")
 
 
-def extract(example: Path) -> list[dict]:
+def extract(example: Path) -> list[tuple]:
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = main(["--extract", "--silent", "-o", "json", str(example)])
-    if code != 0:
-        raise AssertionError(f"renovate-preview exited {code}")
+        status = main(["--extract", "--silent", "-o", "json", str(example)])
+    assert status == 0, f"renovate-preview exited {status}"
     rows = json.loads(out.getvalue())["updates"]
     return sorted({tuple(row[f] for f in FIELDS) for row in rows})
 
 
-@unittest.skipUnless(os.environ.get("RENOVATE_PREVIEW_E2E"), "set RENOVATE_PREVIEW_E2E=1")
-class ExampleTests(unittest.TestCase):
-    def test_examples(self):
-        for example in sorted(p.parent for p in EXAMPLES.glob("*/expected.json")):
-            with self.subTest(example=example.name):
-                expected = json.loads((example / "expected.json").read_text())["dependencies"]
-                want = sorted(tuple(dep[f] for f in FIELDS) for dep in expected)
-                self.assertEqual(extract(example), want)
+@pytest.mark.skipif(
+    not os.environ.get("RENOVATE_PREVIEW_E2E"), reason="set RENOVATE_PREVIEW_E2E=1"
+)
+@pytest.mark.parametrize(
+    "example", sorted(p.parent for p in EXAMPLES.glob("*/expected.json")), ids=lambda p: p.name
+)
+def test_example(example):
+    expected = json.loads((example / "expected.json").read_text())["dependencies"]
+    assert extract(example) == sorted(tuple(dep[f] for f in FIELDS) for dep in expected)
 
 
-class ExampleLayoutTests(unittest.TestCase):
-    def test_every_example_is_complete(self):
-        for example in (p for p in EXAMPLES.iterdir() if p.is_dir()):
-            for name in ("README.md", "renovate.json", "expected.json"):
-                self.assertTrue((example / name).is_file(), f"{example.name}/{name}")
+@pytest.mark.parametrize(
+    "example", [p for p in EXAMPLES.iterdir() if p.is_dir()], ids=lambda p: p.name
+)
+@pytest.mark.parametrize("name", ["README.md", "renovate.json", "expected.json"])
+def test_every_example_is_complete(example, name):
+    assert (example / name).is_file()

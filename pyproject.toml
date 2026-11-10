@@ -6,8 +6,7 @@ build-backend = "hatchling.build"
 name = "renovate-preview"
 dynamic = ["version"]  # from src/renovate_preview/__init__.py
 description = "Dry-run Renovate against a repository and see what it would do."
-# PyPI renders no org-mode, so the README is shown as plain text.
-readme = { file = "README.org", content-type = "text/plain" }
+readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.9"
@@ -37,7 +36,7 @@ path = "src/renovate_preview/__init__.py"
 packages = ["src/renovate_preview"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/renovate_preview", "tests", "examples", "docs", "README.org", "Makefile", "LICENSE"]
+include = ["src/renovate_preview", "tests", "examples", "docs", "README.md", "Makefile", "LICENSE"]
 
 [tool.ruff]
 line-length = 99
@@ -47,4 +46,8 @@ target-version = "py39"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [dependency-groups]
-dev = ["ruff"]
+dev = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

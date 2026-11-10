@@ -1,16 +1,10 @@
 import logging
 import os
-import tempfile
-import unittest
 from unittest import mock
 
-from renovate_preview.container import (
-    Filesystem,
-    Progress,
-    command,
-    filesystem,
-    printable,
-)
+import pytest
+
+from renovate_preview.container import Filesystem, Progress, command, filesystem, printable
 from renovate_preview.renovate import Target
 
 
@@ -20,88 +14,101 @@ def run_command(target="/tmp", engine="podman", image="img:tag", env=None, **kw)
         return command(engine, image, fs, {"LOG_LEVEL": "debug"}, ["--a"], **kw)
 
 
-class FilesystemTests(unittest.TestCase):
-    def test_local_repository_is_the_working_directory(self):
-        fs = filesystem(Target(False, "/repo"), None, None)
-        self.assertEqual(fs, Filesystem([("/repo", "/usr/src/app")], "/usr/src/app"))
-
-    def test_remote_mounts_nothing(self):
-        self.assertEqual(filesystem(Target(True, "o/r"), None, None), Filesystem())
-
-    def test_global_config_keeps_its_extension(self):
-        with tempfile.NamedTemporaryFile(suffix=".json5") as config:
-            fs = filesystem(Target(True, "o/r"), config.name, None)
-        self.assertEqual(fs.global_config, "/renovate-preview/global.json5")
-        self.assertEqual(fs.mounts, [(config.name, "/renovate-preview/global.json5")])
-
-    def test_config(self):
-        with tempfile.NamedTemporaryFile(suffix=".json") as g, tempfile.NamedTemporaryFile() as c:
-            fs = filesystem(Target(True, "o/r"), g.name, c.name)
-        self.assertEqual(
-            (fs.global_config, fs.config),
-            ("/renovate-preview/global.json", "/renovate-preview/config"),
-        )
-        self.assertEqual(len(fs.mounts), 2)
+# Filesystem
 
 
-class CommandTests(unittest.TestCase):
-    def test_mounts(self):
-        argv = run_command()
-        self.assertEqual(argv[:4], ["podman", "run", "--rm", "--pull=never"])
-        self.assertIn("/tmp:/usr/src/app:ro,z", argv)
-        self.assertIn("renovate-preview:/tmp/renovate", argv)
-        self.assertEqual(argv[-2:], ["img:tag", "--a"])
-
-    def test_environment(self):
-        argv = run_command(env={"RENOVATE_TOKEN": "secret"})
-        self.assertIn("LOG_LEVEL=debug", argv)
-        self.assertIn("GIT_CONFIG_VALUE_0=*", argv)
-        self.assertIn("RENOVATE_TOKEN", argv)  # by name: the value stays out of the command
-        self.assertFalse([a for a in argv if "secret" in a])
-
-    def test_program_name_and_shell(self):
-        argv = run_command(program="bash", name="rp", interactive=True)
-        self.assertEqual(argv[argv.index("--name") + 1], "rp")
-        self.assertIn("-it", argv)
-        self.assertEqual(argv[-3:], ["img:tag", "bash", "--a"])
-
-    def test_printable_keeps_flags_with_their_values(self):
-        text = printable(run_command(name="rp"))
-        self.assertTrue(text.startswith("podman run --rm \\\n"))
-        self.assertIn("\n    --name rp \\\n", text)
-        self.assertIn("\n    -e LOG_LEVEL=debug \\\n", text)
+def test_local_repository_is_the_working_directory():
+    fs = filesystem(Target(False, "/repo"), None, None)
+    assert fs == Filesystem([("/repo", "/usr/src/app")], "/usr/src/app")
 
 
-class ProgressTests(unittest.TestCase):
-    LINES = (
-        "Trying to pull ghcr.io/renovatebot/renovate:latest...",
-        '{"level":30,"msg":"Renovate started","renovateVersion":"44.209.0"}',
-        '{"level":30,"msg":"Repository started","renovateVersion":"44.209.0"}',
-        '{"level":20,"msg":"extract()"}',
-        "some later plain text",
+def test_remote_mounts_nothing():
+    assert filesystem(Target(True, "o/r"), None, None) == Filesystem()
+
+
+def test_global_config_keeps_its_extension(tmp_path):
+    config = tmp_path / "global.json5"
+    fs = filesystem(Target(True, "o/r"), str(config), None)
+    assert fs.global_config == "/renovate-preview/global.json5"
+    assert fs.mounts == [(str(config), "/renovate-preview/global.json5")]
+
+
+def test_config(tmp_path):
+    fs = filesystem(Target(True, "o/r"), str(tmp_path / "g.json"), str(tmp_path / "c"))
+    assert (fs.global_config, fs.config) == (
+        "/renovate-preview/global.json",
+        "/renovate-preview/config",
     )
+    assert len(fs.mounts) == 2
 
-    def shown(self, level):
-        logger = logging.getLogger("renovate_preview")
-        logger.setLevel(level)
+
+# Command
+
+
+def test_mounts():
+    argv = run_command()
+    assert argv[:4] == ["podman", "run", "--rm", "--pull=never"]
+    assert "/tmp:/usr/src/app:ro,z" in argv
+    assert "renovate-preview:/tmp/renovate" in argv
+    assert argv[-2:] == ["img:tag", "--a"]
+
+
+def test_environment():
+    argv = run_command(env={"RENOVATE_TOKEN": "secret"})
+    assert "LOG_LEVEL=debug" in argv
+    assert "GIT_CONFIG_VALUE_0=*" in argv
+    assert "RENOVATE_TOKEN" in argv  # by name: the value stays out of the command
+    assert not [a for a in argv if "secret" in a]
+
+
+def test_program_name_and_shell():
+    argv = run_command(program="bash", name="rp", interactive=True)
+    assert argv[argv.index("--name") + 1] == "rp"
+    assert "-it" in argv
+    assert argv[-3:] == ["img:tag", "bash", "--a"]
+
+
+def test_printable_keeps_flags_with_their_values():
+    text = printable(run_command(name="rp"))
+    assert text.startswith("podman run --rm \\\n")
+    assert "\n    --name rp \\\n" in text
+    assert "\n    -e LOG_LEVEL=debug \\\n" in text
+
+
+# Progress
+
+LINES = (
+    "Trying to pull ghcr.io/renovatebot/renovate:latest...",
+    '{"level":30,"msg":"Renovate started","renovateVersion":"44.209.0"}',
+    '{"level":30,"msg":"Repository started","renovateVersion":"44.209.0"}',
+    '{"level":20,"msg":"extract()"}',
+    "some later plain text",
+)
+
+
+@pytest.fixture
+def shown(caplog):
+    """The messages Progress logs at `level`, for LINES."""
+
+    def shown(level: int) -> list[str]:
         progress = Progress("podman, img:latest")
-        with self.assertLogs(logger, level) as logs:
-            for line in self.LINES:
+        with caplog.at_level(level, logger="renovate_preview"):
+            for line in LINES:
                 progress(line)
-        return [record.getMessage() for record in logs.records]
+        return caplog.messages
 
-    def test_default(self):
-        messages = self.shown(logging.INFO)
-        self.assertEqual(
-            messages,
-            [
-                "Renovate 44.209.0 (podman, img:latest)",
-                "reading configuration...",
-                "extracting dependencies...",
-            ],
-        )
+    return shown
 
-    def test_verbose_shows_every_record(self):
-        messages = self.shown(logging.DEBUG)
-        self.assertNotIn("extracting dependencies...", messages)
-        self.assertIn("DEBUG extract()", messages)
+
+def test_progress(shown):
+    assert shown(logging.INFO) == [
+        "Renovate 44.209.0 (podman, img:latest)",
+        "reading configuration...",
+        "extracting dependencies...",
+    ]
+
+
+def test_verbose_progress_shows_every_record(shown):
+    messages = shown(logging.DEBUG)
+    assert "extracting dependencies..." not in messages
+    assert "DEBUG extract()" in messages
