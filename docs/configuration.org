@@ -8,13 +8,14 @@ most surprises.
 
 From lowest to highest priority:
 
-| 1. defaults          | Renovate's built-in defaults                                                     |
-| 2. global config     | the self-hosted config: =--global-config=, then =RENOVATE_*= variables (=--env=) |
-| 3. repository config | the repository's =renovate.json=, or =--config= instead (remote repositories)    |
-| 4. command line      | Renovate flags: anything after =--=                                              |
+| 1. defaults          | Renovate's built-in defaults                                                |
+| 2. global config     | self-hosted: =--global-config=, =--config= (remote), =RENOVATE_*= (=--env=) |
+| 3. repository config | the repository's =renovate.json=, unless =--config= replaces it (remote)    |
+| 4. command line      | Renovate flags: anything after =--=                                         |
 
 When two layers set the same option, the higher one's value is used. Options that only
-one layer sets are kept.
+one layer sets are kept. Within the global config, each source wins over the one before
+it: =--config= over =--global-config=, =RENOVATE_*= variables over both.
 
 - *The repository config wins over the global one.* Most of its settings replace the global
   ones, but lists such as =packageRules= are appended to.
@@ -113,17 +114,27 @@ way.
 on its default branch. A remote preview adds PR titles: Renovate's local platform stops
 before computing them.
 
-=--config FILE= replaces the repository layer: the repository is treated as if it had no
-config, and yours stands in for it. To review a pull request that changes
-=renovate.json=, check out its branch and preview the remote repository with it:
+=--config FILE= stands in for the repository's config: Renovate reads it as global
+config, over =--global-config=, and doesn't read the repository's own. To review a pull
+request that changes =renovate.json=, check out its branch and preview the remote
+repository with it:
 
 #+begin_src sh
 renovate-preview @owner/repo --config renovate.json --columns file,branch,pr-title
 #+end_src
 
-Behind the scenes, the file becomes =RENOVATE_ADDITIONAL_CONFIG_FILE=, and
-=RENOVATE_REQUIRE_CONFIG=ignored= stops Renovate from reading the repository's own config
-(=--just-print= shows it). The global config still applies under it.
+Behind the scenes, the file becomes =RENOVATE_ADDITIONAL_CONFIG_FILE=, which Renovate
+merges over the =--global-config= file, and =RENOVATE_REQUIRE_CONFIG=ignored= stops it from
+reading the repository's own config (=--just-print= shows both).
+
+For most configs, the result is what the pull request's run would do. Two cases differ,
+because your file is global config:
+
+- *Variables win over it.* A =RENOVATE_*= variable passed with =--env= wins over your
+  file, while a repository's =renovate.json= wins over such variables.
+- *Invalid options only warn.* Renovate warns about them ("Config validation errors
+  found"), ignores them, and carries on. The pull request's run would stop instead. Check
+  the file with Renovate's validator: [[file:good-to-know.org::*Every run validates the repository's config][Good to know]].
 
 On a local repository, =--config= can't replace =renovate.json=: Renovate's local platform
 always reads the repository's config, which then wins. Edit =renovate.json= instead.
