@@ -77,20 +77,18 @@ make install
   renovate-preview --shell                   # a shell in that container, instead of Renovate
 #+end_src
 
-Arguments after =--= win: over the repository config (renovate-preview adds
-=--force-cli=true=), and over renovate-preview's own (its =--dry-run=lookup= is dropped if
-you pass =--dry-run=extract=).
+Arguments after =--= take precendence over everything else.
+
+Renovate's working directory and cache are held in the =renovate-preview= volume.
+To clear it between runs: =podman volume rm renovate-preview=
 
 * Environment
 
+We forward the following environment variables to Renovate:
+
 | =RENOVATE_TOKEN=                                | GitHub token. Required for =@owner/repo=.                        |
 | =RENOVATE_GITHUB_COM_TOKEN=, =GITHUB_COM_TOKEN= | Authenticates version lookups on github.com, avoiding rate limits. |
-| =RENOVATE_CONFIG_FILE=                          | Default for =--global-config=.                                   |
 | =RENOVATE_PLATFORM=, =RENOVATE_ENDPOINT=        | For =@owner/repo= on GitLab, Forgejo...                          |
-| =RENOVATE_*=                                    | Forwarded to Renovate, like the ones above.                      |
-
-Renovate's working directory, =/tmp/renovate= (its caches), lives in the =renovate-preview=
-container volume between runs. =podman volume rm renovate-preview= resets it.
 
 * Configuration
 ** Global
@@ -174,5 +172,3 @@ make examples   # check examples/ against a real Renovate, in podman or docker
 make lint
 make build
 #+end_src
-
-[[file:docs/architecture.org][=docs/architecture.org=]]: how the code is organised.
