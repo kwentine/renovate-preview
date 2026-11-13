@@ -1,7 +1,7 @@
 name: release
 
-# Push a tag such as v0.1.0. The package goes to PyPI through trusted publishing: no
-# token is stored anywhere. See https://docs.pypi.org/trusted-publishers/
+# Push a tag such as v0.1.0. The package goes to PyPI through trusted publishing.
+# See: https://docs.pypi.org/trusted-publishers/
 on:
   push:
     tags: ["v*"]

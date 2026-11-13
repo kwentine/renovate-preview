@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.9"
-authors = [{ name = "Quentin Ågren", email = "quentin@scilifelab.se" }]
+authors = [{ name = "Quentin Ågren", email = "quentin.agren@gmail.com" }]
 keywords = ["renovate", "dependencies", "dry-run", "devops"]
 classifiers = [
   "Development Status :: 4 - Beta",
