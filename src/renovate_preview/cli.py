@@ -59,9 +59,36 @@ environment forwarded to Renovate:
   any other NAME          with --env NAME, e.g. for registry credentials, see
                           https://docs.renovatebot.com/self-hosted-configuration/#detecthostrulesfromenv
 
+defaults for renovate-preview's options, from its environment:
+  RENOVATE_PREVIEW_GLOBAL_CONFIG   --global-config
+  RENOVATE_PREVIEW_CONFIG          --config
+  RENOVATE_PREVIEW_COLUMNS         --columns
+  RENOVATE_PREVIEW_HOST            --host
+
 Renovate runs in podman, or else docker. Its working directory, {VOLUME_MOUNT}, is the
 {VOLUME} volume: its caches survive between runs.
 """
+
+# Option defaults, which RENOVATE_PREVIEW_<DEST> variables override: see variable().
+DEFAULTS = {
+    "global_config": None,
+    "config": None,
+    "columns": None,  # Depends on the run: see columns().
+    "host": GITHUB,
+}
+
+
+def variable(dest: str) -> str:
+    """Return the variable that overrides the default of option `dest`."""
+    return f"RENOVATE_PREVIEW_{dest.upper()}"
+
+
+def origin(opts: argparse.Namespace, dest: str) -> str:
+    """Return where option `dest` got its value, for a message: its flag, or its variable."""
+    if opts.origin[dest] == "env":
+        return variable(dest)
+    return "--" + dest.replace("_", "-")
+
 
 # What a dry run reads. Renovate documents the permissions of a real run, which writes:
 # https://docs.renovatebot.com/modules/platform/github/#permissions
@@ -75,19 +102,18 @@ PAT_PERMISSIONS = {
 }
 
 
+def columns(opts: argparse.Namespace) -> list[str]:
+    """Return the columns to show: those of --columns, or the defaults for this run."""
+    if opts.columns is None:
+        return default_columns(opts.extract, bool(opts.remote))
+    return column_names(opts.columns)
+
+
 def column_names(value: str) -> list[str]:
-    """Parse --columns: a comma-separated list of names, 'all', or 'help' (as ['help'])."""
+    """Return the names in --columns: a comma-separated list, or 'all'. check() checks them."""
     if value == "all":
         return list(COLUMNS)
-    if value == "help":
-        return ["help"]
-    names = [name.strip() for name in value.split(",") if name.strip()]
-    unknown = [name for name in names if name not in COLUMNS]
-    if unknown or not names:
-        raise argparse.ArgumentTypeError(
-            f"unknown column(s) {','.join(unknown)}: see --columns=help"
-        )
-    return names
+    return [name.strip() for name in value.split(",") if name.strip()]
 
 
 def variable_name(value: str) -> str:
@@ -98,6 +124,7 @@ def variable_name(value: str) -> str:
 
 
 def parser() -> argparse.ArgumentParser:
+    """Return our command line's parser: the options in DEFAULTS get theirs later."""
     p = argparse.ArgumentParser(
         prog="renovate-preview",
         description="Dry-run Renovate against a repository and summarize what it would do.",
@@ -118,7 +145,9 @@ def parser() -> argparse.ArgumentParser:
         help="only list the dependencies found, do not lookup available versions",
     )
     what.add_argument(
-        "--global-config", metavar="FILE", help="a self-hosted Renovate global config"
+        "--global-config",
+        metavar="FILE",
+        help="a self-hosted Renovate global config (default: $RENOVATE_PREVIEW_GLOBAL_CONFIG)",
     )
     what.add_argument(
         "--from",
@@ -130,12 +159,13 @@ def parser() -> argparse.ArgumentParser:
     what.add_argument(
         "--config",
         metavar="FILE",
-        help="a repository config, instead of the repository's own (e.g. a PR's renovate.json)",
+        help="a repository config, instead of the repository's own (e.g. a PR's "
+        "renovate.json; default: $RENOVATE_PREVIEW_CONFIG)",
     )
     what.add_argument(
         "--host",
-        default=GITHUB,
-        help=f"with @owner/repo: a GitHub Enterprise Server (default: {GITHUB})",
+        help="with @owner/repo: a GitHub Enterprise Server "
+        f"(default: $RENOVATE_PREVIEW_HOST, or {GITHUB})",
     )
 
     out = p.add_argument_group("output")
@@ -149,11 +179,15 @@ def parser() -> argparse.ArgumentParser:
     out.add_argument(
         "--columns",
         metavar="LIST",
-        type=column_names,
-        help="comma-separated columns for table and html "
-        f"(default: {','.join(default_columns(False))}); 'all' for every one, 'help' to list them",
+        help="comma-separated columns for table and html (default: $RENOVATE_PREVIEW_COLUMNS, "
+        "or the essentials for the run); 'all' for every one, 'help' to list them",
     )
     out.add_argument("-w", "--write", metavar="FILE", help="write the output to FILE")
+    out.add_argument(
+        "--show-config",
+        action="store_true",
+        help="show the config Renovate resolved, presets included, before the table",
+    )
     loudness = out.add_mutually_exclusive_group()
     loudness.add_argument(
         "-v", "--verbose", action="store_true", help="show what Renovate is doing as it runs"
@@ -186,13 +220,30 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
-    """Return our options, and the arguments after `--`, which are Renovate's."""
+def parse_args(
+    argv: list[str], environ: Mapping[str, str]
+) -> tuple[argparse.Namespace, list[str]]:
+    """Return our options, and the arguments after `--`, which are Renovate's.
+
+    The options in DEFAULTS come from the command line, else from their variable in
+    `environ`, else from DEFAULTS. ``opts.origin[dest]`` says which: "cli", "env" or
+    "default".
+    """
     theirs: list[str] = []
     if "--" in argv:
         split = argv.index("--")
         argv, theirs = argv[:split], argv[split + 1 :]
     opts = parser().parse_args(argv)
+    opts.origin = {}
+    for dest, default in DEFAULTS.items():
+        if getattr(opts, dest) is not None:
+            opts.origin[dest] = "cli"
+        elif value := environ.get(variable(dest)):
+            setattr(opts, dest, value)
+            opts.origin[dest] = "env"
+        else:
+            setattr(opts, dest, default)
+            opts.origin[dest] = "default"
     if opts.repository and opts.repository.startswith("@"):
         opts.remote, opts.directory = opts.repository[1:], None
     else:
@@ -221,7 +272,7 @@ def setup_logging(opts: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ) -> int:
     try:
-        opts, theirs = parse_args(sys.argv[1:] if argv is None else argv)
+        opts, theirs = parse_args(sys.argv[1:] if argv is None else argv, environ)
         setup_logging(opts)
         return preview(opts, theirs, environ)
     except BrokenPipeError:
@@ -236,11 +287,9 @@ def preview(opts: argparse.Namespace, theirs: list[str], environ: Mapping[str, s
     if opts.pat_url:
         print(pat_url(opts.host))
         return 0
-    if opts.columns == ["help"]:
+    if opts.columns == "help":
         print(columns_help())
         return 0
-    if opts.source:
-        return replay(opts, theirs, environ)
 
     errors, warnings = check(opts, theirs, environ)
     for message in warnings:
@@ -249,6 +298,8 @@ def preview(opts: argparse.Namespace, theirs: list[str], environ: Mapping[str, s
         log.error(message)
     if errors:
         return 2
+    if opts.source:
+        return replay(opts, environ)
 
     engine = container.detect_engine()
     if engine is None:
@@ -290,20 +341,28 @@ def preview(opts: argparse.Namespace, theirs: list[str], environ: Mapping[str, s
 def check(
     opts: argparse.Namespace, theirs: list[str], environ: Mapping[str, str]
 ) -> tuple[list[str], list[str]]:
-    """Return (errors, warnings) about a run, before anything is run.
+    """Return (errors, warnings) about a run or a replay, before anything is run.
 
     Only what would otherwise fail silently, confusingly or late. argparse rejects the
     rest. Any error means no run.
     """
     errors, warnings = [], []
+    names = columns(opts)
+    unknown = [name for name in names if name not in COLUMNS]
+    if unknown or not names:
+        what = f"unknown column(s) {','.join(unknown)}" if unknown else "no column names"
+        errors.append(f"{origin(opts, 'columns')}: {what}: see --columns=help")
+    if opts.source:
+        return errors, warnings  # A replay: only the output options apply.
     if not opts.remote and not Path(opts.directory).is_dir():
         errors.append(f"no such directory: {opts.directory}")
-    if opts.host != GITHUB and not opts.remote:
+    if opts.origin["host"] == "cli" and not opts.remote:
         errors.append("--host goes with a remote repository: @owner/repo")
     # docker would create a missing file as a directory.
-    for config in (opts.global_config, opts.config):
-        if config and not Path(config).is_file():
-            errors.append(f"no such config file: {config}")
+    for dest in ("global_config", "config"):
+        path = getattr(opts, dest)
+        if path and not Path(path).is_file():
+            errors.append(f"{origin(opts, dest)}: no such config file: {path}")
     if not opts.remote and renovate.their_flags(theirs).dry_run == "full":
         errors.append(
             "the local platform can't do a full dry run (Renovate turns it into 'lookup'). "
@@ -314,7 +373,8 @@ def check(
 
     if opts.config and not opts.remote and (own := renovate.find_config_file(opts.directory)):
         warnings.append(
-            f"{own.relative_to(opts.directory)} is read too, and wins over --config: "
+            f"{own.relative_to(opts.directory)} is read too, and wins over "
+            f"{origin(opts, 'config')}: "
             "Renovate's local platform always reads the repository's config"
         )
     warnings += [f"--env {name}: not set" for name in opts.env if name not in environ]
@@ -331,6 +391,8 @@ def show(opts, document: dict, lines: list[str], records: list[dict], status: in
     look; a table or a page would only mislead ("No dependencies found.").
     """
     error = failure(document, records, status)
+    if opts.show_config and document["config"] is None:
+        log.warning("no config in Renovate's log: it needs a run with --show-config")
     if not error or opts.output in ("json", "raw", "report"):
         write(render(opts, document, lines, records), opts.write)
     if error:
@@ -380,11 +442,12 @@ def keep_last_run(lines: list[str], environ: Mapping[str, str]) -> None:
         log.warning("could not keep this run for --from last: %s", err)
 
 
-def replay(opts: argparse.Namespace, theirs: list[str], environ: Mapping[str, str]) -> int:
-    """Render a log instead of a run (--from), as a run would be."""
-    if error := check_replay(opts, theirs):
-        log.error(error)
-        return 2
+def replay(opts: argparse.Namespace, environ: Mapping[str, str]) -> int:
+    """Render a log instead of a run (--from), as a run would be.
+
+    Options that only apply to a run are ignored, so a run's command line, with
+    `--from last` appended, shows that run again.
+    """
     if opts.source == "-":
         label, text = "stdin", sys.stdin.read()
     else:
@@ -406,34 +469,6 @@ def replay(opts: argparse.Namespace, theirs: list[str], environ: Mapping[str, st
     return show(opts, document, lines, records, status=0)
 
 
-def check_replay(opts: argparse.Namespace, theirs: list[str]) -> str | None:
-    """Return an error if an option only applies to a run, rather than silently ignore it."""
-    given = {
-        f"the repository ({opts.repository})": opts.repository,
-        "--extract": opts.extract,
-        "--config": opts.config,
-        "--global-config": opts.global_config,
-        "--host": opts.host != GITHUB,
-        "--image": opts.image != IMAGE,
-        "--tag": opts.tag != TAG,
-        "--name": opts.name,
-        "--env": opts.env,
-        "--shell": opts.shell,
-        "--just-print": opts.just_print,
-        "arguments after --": theirs,
-    }
-    run_only = [name for name, value in given.items() if value]
-    if not run_only:
-        return None
-    message = (
-        "--from shows a saved log instead of running Renovate, so these options don't "
-        f"apply: {', '.join(run_only)}"
-    )
-    if opts.repository and opts.source == "last":
-        message += ". --from last is the latest run, whichever repository it was"
-    return message
-
-
 def print_command(argv: list[str]) -> int:
     print(container.printable(argv))
     return 0
@@ -446,21 +481,17 @@ def render(opts, document: dict, lines: list[str], records: list[dict]) -> str:
         return json.dumps(raw_report(records), indent=2)
     if opts.output == "json":
         return to_json(document)
-    names = opts.columns or default_columns(opts.extract)
-    return html_page(document, names) if opts.output == "html" else table(document, names)
+    names = columns(opts)
+    if opts.output == "html":
+        return html_page(document, names, opts.show_config)
+    if opts.show_config and document["config"] is not None:
+        return f"{json.dumps(document['config'], indent=2)}\n\n{table(document, names)}"
+    return table(document, names)
 
 
 def columns_help() -> str:
-    """Return the help of --columns=help: the names, which column each shows, the defaults."""
-
-    def note(name: str) -> str:
-        if name not in default_columns(extract=False):
-            return ""
-        return (
-            "(default)" if name in default_columns(extract=True) else "(default, unless --extract)"
-        )
-
-    lines = [f"{name:<12}{title:<12}{note(name)}".rstrip() for name, (title, _) in COLUMNS.items()]
+    """Return the help of --columns=help: the names, and which column each shows."""
+    lines = [f"{name:<12}{title}" for name, (title, _) in COLUMNS.items()]
     return "\n".join([*lines, "all         every column above"])
 
 

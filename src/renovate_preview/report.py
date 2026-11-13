@@ -12,6 +12,11 @@ import json
 
 LEVELS = {10: "trace", 20: "debug", 30: "info", 40: "warn", 50: "error", 60: "fatal"}
 
+# With --print-config (renovate-preview --show-config), Renovate logs the repository's
+# config, presets resolved, defaults included, in this record's `config`. We leave out
+# its `hostRules`. https://docs.renovatebot.com/self-hosted-configuration/#printconfig
+RESOLVED_CONFIG = "Full resolved config and hostRules including presets"
+
 # What a record says about how far the run has got, for the progress hints.
 PHASES = {
     "Repository started": "reading configuration",
@@ -46,11 +51,13 @@ def raw_report(records: list[dict]) -> dict | None:
 
 def summarize(target: str, records: list[dict]) -> dict:
     """Return the document every output format renders."""
-    report, version, stats, problems = None, None, None, []
+    report, version, stats, problems, config = None, None, None, [], None
     for record in records:
         msg = record.get("msg")
         if msg == "Printing report" and isinstance(record.get("report"), dict):
             report = record["report"]
+        elif msg == RESOLVED_CONFIG:
+            config = record.get("config")
         elif msg == "Repository started":
             version = record.get("renovateVersion")
         elif msg == "Dependency extraction complete":
@@ -91,6 +98,7 @@ def summarize(target: str, records: list[dict]) -> dict:
         "updates": sorted(updates, key=sort_key),
         "branches": branches,
         "problems": problems,
+        "config": config,
     }
 
 

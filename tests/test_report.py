@@ -28,6 +28,12 @@ def test_invalid_config_says_why():
     ]
 
 
+def test_resolved_config():
+    record = {"msg": "Full resolved config and hostRules including presets", "config": {"a": 1}}
+    assert summarize("x", [record])["config"] == {"a": 1}
+    assert summarize("x", [])["config"] is None
+
+
 def test_no_report():
     assert summarize("x", [])["updates"] == []
 

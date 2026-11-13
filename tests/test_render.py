@@ -13,9 +13,11 @@ def header(text: str) -> list[str]:
 
 
 def test_default_columns(lookup):
-    assert default_columns(extract=False) == ["dependency", "current", "new", "file"]
-    assert default_columns(extract=True) == ["dependency", "current", "file"]
-    lines = table(lookup, default_columns(False)).splitlines()
+    assert default_columns(extract=True, remote=False) == ["dependency", "current", "file"]
+    assert default_columns(extract=False, remote=False) == ["dependency", "current", "new", "file"]
+    assert default_columns(extract=False, remote=True)[-1] == "pr-title"
+    assert "pr-title" not in default_columns(extract=True, remote=True)
+    lines = table(lookup, default_columns(extract=False, remote=False)).splitlines()
     assert lines[0].split() == ["DEPENDENCY", "CURRENT", "NEW", "FILE"]
     assert len(lines) == 2 + 4
 
@@ -69,6 +71,6 @@ def test_html_highlights(release_age):
 
 
 def test_no_highlight_without_its_column(release_age):
-    page = html_page(release_age, default_columns(False)).split("</style>")[1]
+    page = html_page(release_age, default_columns(False, False)).split("</style>")[1]
     assert "warn" not in page
     assert "pending" not in page

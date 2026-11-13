@@ -5,7 +5,7 @@ from unittest import mock
 
 import pytest
 
-from renovate_preview.cli import check, last_run, parse_args
+from renovate_preview.cli import check, column_names, last_run, parse_args
 from renovate_preview.render import COLUMNS
 
 from .conftest import INVALID_CONFIG, RELEASE_AGE
@@ -21,15 +21,15 @@ LINES = (
 
 
 def test_everything_after_double_dash_is_passed_through():
-    opts, theirs = parse_args(["repo", "--", "--foo", "--", "bar"])
+    opts, theirs = parse_args(["repo", "--", "--foo", "--", "bar"], {})
     assert opts.repository == "repo"
     assert theirs == ["--foo", "--", "bar"]
 
 
 def test_the_repository_is_resolved_once():
-    opts, _ = parse_args(["@o/r"])
+    opts, _ = parse_args(["@o/r"], {})
     assert (opts.remote, opts.directory) == ("o/r", None)
-    opts, _ = parse_args([])
+    opts, _ = parse_args([], {})
     assert (opts.remote, opts.directory) == (None, str(Path.cwd()))
 
 
@@ -60,13 +60,29 @@ def test_columns_help(run):
     status, out, _ = run("--columns=help")
     lines = out.splitlines()
     assert status == 0
-    assert lines[0].split() == ["dependency", "DEPENDENCY", "(default)"]
-    assert "new         NEW         (default, unless --extract)" in lines
+    assert lines[0].split() == ["dependency", "DEPENDENCY"]
+    assert "pr-title    PR TITLE" in lines
     assert lines[-1].split()[0] == "all"
 
 
 def test_columns_all():
-    assert parse_args(["--columns=all"])[0].columns == list(COLUMNS)
+    assert column_names("all") == list(COLUMNS)
+    assert column_names(" new, file,") == ["new", "file"]
+
+
+def test_default_columns_depend_on_the_run(run):
+    def header(*argv):
+        return run(*argv, "--from", str(RELEASE_AGE))[1].splitlines()[0].split()
+
+    assert header() == ["DEPENDENCY", "CURRENT", "NEW", "FILE"]
+    assert header("--extract") == ["DEPENDENCY", "CURRENT", "FILE"]
+    assert header("@o/r") == ["DEPENDENCY", "CURRENT", "NEW", "FILE", "PR", "TITLE"]
+
+
+def test_unknown_columns_in_a_replay(run):
+    status, _, err = run("--from", str(RELEASE_AGE), "--columns", "dep")
+    assert status == 2
+    assert "--columns: unknown column(s) dep" in err
 
 
 def test_full_dry_run_is_fine_remotely(run):
@@ -80,7 +96,7 @@ def test_remote_needs_a_token(run):
 
 
 def test_check_returns_errors_and_warnings():
-    opts, theirs = parse_args(["@o/r", "--env", "X"])
+    opts, theirs = parse_args(["@o/r", "--env", "X"], {})
     errors, warnings = check(opts, theirs, {})
     assert errors == ["RENOVATE_TOKEN must be set to reach a remote repository (see --pat-url)"]
     assert warnings[0] == "--env X: not set"
@@ -117,6 +133,76 @@ def test_only_tokens_are_forwarded_and_env_adds_more(run):
     assert "REGISTRY_PASSWORD" not in out
     assert "-e REGISTRY_PASSWORD \\" in more
     assert "--env X: not set" in err
+
+
+# Defaults from RENOVATE_PREVIEW_* variables
+
+
+def test_defaults_from_the_environment(run, tmp_path):
+    g, c = tmp_path / "g.json", tmp_path / "c.json"
+    g.write_text("{}")
+    c.write_text("{}")
+    env = {
+        "RENOVATE_PREVIEW_GLOBAL_CONFIG": str(g),
+        "RENOVATE_PREVIEW_CONFIG": str(c),
+        "RENOVATE_PREVIEW_HOST": "ghe.example.com",
+        "RENOVATE_TOKEN": "t",
+    }
+    _, out, _ = run("@o/r", "--just-print", env=env)
+    assert "RENOVATE_CONFIG_FILE=/renovate-preview/global.json" in out
+    assert "RENOVATE_ADDITIONAL_CONFIG_FILE=/renovate-preview/config.json" in out
+    assert "--endpoint=https://ghe.example.com/api/v3/" in out
+
+
+def test_options_win_over_the_environment():
+    environ = {"RENOVATE_PREVIEW_HOST": "ghe.example.com", "RENOVATE_PREVIEW_COLUMNS": "file"}
+    opts, _ = parse_args(["--host", "github.com", "--columns", "new"], environ)
+    assert (opts.host, opts.columns) == ("github.com", "new")
+    opts, _ = parse_args([], environ)
+    assert (opts.host, opts.columns) == ("ghe.example.com", "file")
+
+
+def test_a_variable_that_does_not_apply_is_ignored(run):
+    # It doesn't apply to a local repository: ignored.
+    env = {"RENOVATE_PREVIEW_HOST": "ghe.example.com"}
+    status, out, err = run(".", "--just-print", env=env)
+    assert (status, err) == (0, "")
+    assert "--endpoint" not in out
+    # Typed, it is one.
+    status, _, err = run(".", "--just-print", "--host", "ghe.example.com", env=env)
+    assert status == 2
+    assert "--host goes with a remote repository" in err
+
+
+def test_a_value_names_its_origin(run, tmp_path):
+    env = {"RENOVATE_PREVIEW_CONFIG": str(tmp_path / "missing.json")}
+    _, _, err = run(".", "--just-print", env=env)
+    assert f"RENOVATE_PREVIEW_CONFIG: no such config file: {tmp_path}/missing.json" in err
+    _, _, err = run(".", "--just-print", "--config", "nope.json", env=env)
+    assert "--config: no such config file: nope.json" in err
+    opts, _ = parse_args(["--config", "c.json"], {"RENOVATE_PREVIEW_HOST": "h"})
+    assert opts.origin == {
+        "global_config": "default",
+        "config": "cli",
+        "columns": "default",
+        "host": "env",
+    }
+
+
+def test_columns_from_the_environment_are_checked(run):
+    status, _, err = run("--just-print", env={"RENOVATE_PREVIEW_COLUMNS": "nope"})
+    assert status == 2
+    assert "RENOVATE_PREVIEW_COLUMNS: unknown column(s) nope" in err
+
+
+def test_columns_from_the_environment_apply_to_a_replay(run):
+    env = {
+        "RENOVATE_PREVIEW_COLUMNS": "dependency,new",
+        "RENOVATE_PREVIEW_HOST": "ghe.example.com",
+    }
+    status, out, _ = run("--from", str(RELEASE_AGE), env=env)
+    assert status == 0
+    assert out.splitlines()[0].split() == ["DEPENDENCY", "NEW"]
 
 
 # --config
@@ -230,6 +316,46 @@ def test_failure_points_to_the_raw_log(run, renovate):
     assert "-o raw" in err
 
 
+# --show-config
+
+CONFIG = json.dumps(
+    {
+        "level": 30,
+        "msg": "Full resolved config and hostRules including presets",
+        "config": {"branchPrefix": "renovate/", "ignorePaths": ["a/**"]},
+        "hostRules": [{"hostType": "local"}],
+    }
+)
+
+
+def test_show_config_asks_renovate_to_print_it(run):
+    assert "--print-config=true" in run(".", "--just-print", "--show-config")[1]
+    assert "--print-config" not in run(".", "--just-print")[1]
+
+
+def test_show_config_before_the_table(run, renovate):
+    renovate(LINES[0], CONFIG, REPORT)
+    _, out, _ = run(".", "--show-config")
+    config, rest = out.split("\n\n", 1)
+    assert json.loads(config) == {"branchPrefix": "renovate/", "ignorePaths": ["a/**"]}
+    assert "hostType" not in out
+    assert rest.startswith("No dependencies found")
+    assert "branchPrefix" not in run(".")[1]
+
+
+def test_show_config_in_a_page(run, renovate):
+    renovate(LINES[0], CONFIG, REPORT)
+    _, out, _ = run(".", "--show-config", "-o", "html")
+    assert "<details><summary>Renovate's resolved config" in out
+    assert "&quot;branchPrefix&quot;: &quot;renovate/&quot;" in out
+
+
+def test_show_config_without_config_in_the_log(run):
+    status, _, err = run("--from", str(RELEASE_AGE), "--show-config")
+    assert status == 0
+    assert "no config in Renovate's log" in err
+
+
 # --pat-url
 
 
@@ -302,17 +428,11 @@ def test_not_a_renovate_log(run, tmp_path):
     assert "no Renovate JSON log records" in err
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        [".", "--from", "x"],
-        ["--from", "x", "--extract"],
-        ["--from", "x", "--global-config", "g.json"],
-        ["--from", "x", "--", "--foo"],
-        ["--from", "x", "--env", "X"],
-    ],
-)
-def test_run_only_options_are_rejected_with_from(run, argv):
-    status, _, err = run(*argv)
-    assert status == 2
-    assert "--from shows a saved log instead of running Renovate" in err
+def test_run_only_options_are_ignored_with_from(run):
+    # A run's command line, with --from added, shows that run again. Before `--`: after
+    # it, --from would be one of Renovate's arguments.
+    ours = [".", "--host", "ghe.example.com", "--tag", "1", "--env", "X", "--extract"]
+    replay = ["--from", str(RELEASE_AGE), "--columns", "dependency"]
+    status, out, _ = run(*ours, *replay, "--", "--foo")
+    assert status == 0
+    assert out.startswith("DEPENDENCY")

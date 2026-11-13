@@ -74,12 +74,14 @@ def container_args(opts: argparse.Namespace, theirs: list[str]) -> list[str]:
     else:
         # The local platform can't do 'full': it would silently downgrade to 'lookup'.
         ours["--dry-run"] = "full" if opts.remote else "lookup"
+    if opts.show_config:
+        ours["--print-config"] = "true"
     if theirs:
         # Renovate's default, but a global config could turn it off.
         ours["--force-cli"] = "true"
     # Other platforms: -- --platform=gitlab --endpoint=...
     ours["--platform"] = "github" if opts.remote else "local"
-    if opts.host != GITHUB:
+    if opts.remote and opts.host != GITHUB:
         ours["--endpoint"] = f"https://{opts.host}/api/v3/"  # GitHub Enterprise Server
 
     given = {flag(arg) for arg in theirs}

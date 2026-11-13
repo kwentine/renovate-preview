@@ -63,6 +63,7 @@ From a local checkout:
 ```sh
 uv tool install .   # or,
 make install        # a launcher in ~/.local/bin, running this checkout: edits apply at once
+make install prefix=/usr/local   # ... elsewhere: in /usr/local/bin
 ```
 
 ## Usage
@@ -89,6 +90,7 @@ renovate-preview -o html -w report.html    # ... written to a file rather than s
 renovate-preview -o raw                    # Renovate's own log; or its report: -o report
 renovate-preview --from last --columns all # the last run again, other columns: no re-run
 renovate-preview --from run.ndjson         # any Renovate JSON log (- for stdin)
+renovate-preview --show-config             # also the config Renovate resolved, presets included
 renovate-preview --verbose                 # what Renovate is doing, as it runs
 renovate-preview --silent                  # no progress hints or warnings
 
@@ -125,6 +127,23 @@ Renovate's settings are its arguments, after `--`. For example, `@owner/repo` on
 
 ```sh
 renovate-preview @owner/repo -- --platform=gitlab --endpoint=https://gitlab.example.com/api/v4/
+```
+
+Defaults for renovate-preview's own options can come from its environment.
+
+| Variable                         | Default for       |
+|----------------------------------|-------------------|
+| `RENOVATE_PREVIEW_GLOBAL_CONFIG` | `--global-config` |
+| `RENOVATE_PREVIEW_CONFIG`        | `--config`        |
+| `RENOVATE_PREVIEW_COLUMNS`       | `--columns`       |
+| `RENOVATE_PREVIEW_HOST`          | `--host`          |
+
+For example, in your shell's profile, so that every preview uses your organisation's
+self-hosted config, and your favourite columns:
+
+```sh
+export RENOVATE_PREVIEW_GLOBAL_CONFIG=~/renovate/config.json
+export RENOVATE_PREVIEW_COLUMNS=dependency,current,new,type,age,file
 ```
 
 ## Configuration
@@ -183,8 +202,8 @@ renovate-preview examples/custom-manager-regex
 The tests need pytest: `uv run make test` installs it in `.venv`, with ruff.
 
 ```sh
-make test       # unit tests
-make examples   # check examples/ against a real Renovate, in podman or docker
+make test        # unit tests (or: make check)
+make examples    # check examples/ against a real Renovate, in podman or docker
 make lint
-make build
+make distcheck   # build the wheel and sdist, check them, run the wheel as installed
 ```

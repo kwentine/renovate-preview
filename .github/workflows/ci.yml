@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+# pytest and ruff come from uv.lock, as they do locally with `uv run`. --locked fails the
+# job if uv.lock is out of date with pyproject.toml.
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,27 +20,21 @@ jobs:
         python: ["3.9", "3.14"]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python }}
-      - run: pip install pytest
-      - run: make test
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uv run --locked --python ${{ matrix.python }} make test
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
-      - run: uvx ruff check src tests && uvx ruff format --check src tests
+      - run: uv run --locked make lint
 
   examples:
     # Each example through a real Renovate, in podman (on GitHub's Ubuntu runners).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - run: pip install pytest
+      - uses: astral-sh/setup-uv@v10.3.3
       - run: podman pull ghcr.io/renovatebot/renovate:latest
-      - run: make examples
+      - run: uv run --locked make examples

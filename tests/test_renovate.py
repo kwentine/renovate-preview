@@ -10,11 +10,11 @@ from renovate_preview.renovate import (
 
 
 def args(*argv):
-    return container_args(*parse_args(list(argv)))
+    return container_args(*parse_args(list(argv), {}))
 
 
 def opts(*argv):
-    return parse_args(list(argv))[0]
+    return parse_args(list(argv), {})[0]
 
 
 # Arguments

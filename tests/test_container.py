@@ -7,7 +7,7 @@ from renovate_preview.container import Progress, mounts, printable, runtime_args
 
 
 def opts(*argv):
-    return parse_args(list(argv))[0]
+    return parse_args(list(argv), {})[0]
 
 
 def command(*argv, environ=None):

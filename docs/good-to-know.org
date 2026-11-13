@@ -30,9 +30,9 @@ PR titles are not. Against =@owner/repo= the dry run is complete, titles include
 ** Columns
 | Column       | Shows                                                                   |
 |--------------+-------------------------------------------------------------------------|
-| =dependency= | the dependency's name (default)                                         |
-| =current=    | its current version (default)                                           |
-| =new=        | the update's version (default, unless =--extract=)                      |
+| =dependency= | the dependency's name                                                   |
+| =current=    | its current version                                                     |
+| =new=        | the update's version                                                    |
 | =type=       | major, minor, patch, digest...                                          |
 | =breaking=   | as its versioning scheme says: under semver, any 0.x change is breaking |
 | =age=        | the new version's age (see below)                                       |
@@ -40,11 +40,13 @@ PR titles are not. Against =@owner/repo= the dry run is complete, titles include
 | =manager=    | the Renovate manager that found it                                      |
 | =datasource= | where its versions are looked up                                        |
 | =versioning= | its versioning scheme                                                   |
-| =file=       | the file it's in (default)                                              |
+| =file=       | the file it's in                                                        |
 | =branch=     | the branch Renovate would create                                        |
 | =pr-title=   | the pull request's title (=@owner/repo= only)                           |
 
-Choose them with =--columns=; =--columns help= lists them. =-o json= always has everything.
+By default: =dependency=, =current= and =file=; =new= too when versions are looked up (not
+with =--extract=); and =pr-title= too for =@owner/repo=. Choose others with =--columns=;
+=--columns help= lists them. =-o json= always has everything.
 
 ** AGE and PENDING: =minimumReleaseAge=
 - *AGE* is the new version's age. It's empty when the registry gives no release date:
