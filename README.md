@@ -1,9 +1,22 @@
 # renovate-preview
 
-Dry-run [Renovate](https://docs.renovatebot.com/) against a repository, and preview the
-results as a table.
+Perfrom a [Renovate](https://docs.renovatebot.com/) dry run to preview the results.
 
-Renovate runs in a container, with `podman` or `docker` (whichever is installed).
+Renovate executes in a container from the `ghcr.io/renovatebot/renovate` image,
+using whichever of `podman` or `docker` is installed.
+
+The intended benefits are:
+1. Avoiding the need to install it on your machine with `npm`
+2. Sparing you the complex commands to invoke Renovate though `podman` or `docker`
+3. Extracting and summarizing useful information from the profuse Renovate logs
+4. Assessing the behavior of local configuration changes on a remote repository (such as pull request titles).
+
+`renovate-preview` is implemented in Python and has no dependencies.
+It is developed with considerable help from Claude Code, but not vide-coded.
+
+## Use cases
+
+### Preview dependencies and available updates from a local repository
 
 ```console
 $ cd path/to/repo
@@ -14,6 +27,17 @@ DEPENDENCY     CURRENT  NEW      FILE
 -------------  -------  -------  ------------------
 trust-manager  v0.22.0  v0.26.0  kustomization.yaml
 trust-manager  v0.22.0  v0.22.1  kustomization.yaml
+```
+
+
+### Test the behavior of a local configuration on a remote repository
+Let's say you have edited a local checkout of `renovate.json`,
+and would like to verify that pull request titles are formatted according to your wishes:
+```
+$ renovate-preview @owner/repo --columns=dependency,current,new,pr-title
+DEPENDENCY     CURRENT  NEW    PR TITLE
+-------------  -------  ---    --------
+example-chart  1.2.3    1.2.4  chore(deps): Update example-chart to v1.2.4
 ```
 
 ## Try it
