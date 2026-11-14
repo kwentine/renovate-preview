@@ -1,18 +1,21 @@
 # renovate-preview
 
-Perfrom a [Renovate](https://docs.renovatebot.com/) dry run to preview the results.
+Perform a [Renovate](https://docs.renovatebot.com/) dry run to preview the results.
 
-Renovate executes in a container from the `ghcr.io/renovatebot/renovate` image,
-using whichever of `podman` or `docker` is installed.
+Renovate executes in a container from the
+[`ghcr.io/renovatebot/renovate`](https://docs.renovatebot.com/getting-started/running/#docker-images)
+image, using whichever of [podman](https://podman.io/) or [docker](https://www.docker.com/)
+is installed.
 
 The intended benefits are:
 1. Avoiding the need to install it on your machine with `npm`
-2. Sparing you the complex commands to invoke Renovate though `podman` or `docker`
+2. Sparing you the complex commands to invoke Renovate through `podman` or `docker`
 3. Extracting and summarizing useful information from the profuse Renovate logs
 4. Assessing the behavior of local configuration changes on a remote repository (such as pull request titles).
 
 `renovate-preview` is implemented in Python and has no dependencies.
-It is developed with considerable help from Claude Code, but not vide-coded.
+It is developed with considerable help from [Claude Code](https://claude.com/claude-code), but by no means vibe-coded 🙂.
+
 
 ## Use cases
 
@@ -58,6 +61,9 @@ From PyPI:
 uv tool install renovate-preview   # or: pipx install renovate-preview
 ```
 
+[uv](https://docs.astral.sh/uv/) and [pipx](https://pipx.pypa.io/) install a command
+line tool in an environment of its own.
+
 From a local checkout:
 
 ```sh
@@ -100,7 +106,9 @@ renovate-preview --just-print              # the container command, without runn
 renovate-preview --shell                   # a shell in that container, instead of Renovate
 ```
 
-Arguments after `--` take precedence over everything else.
+Arguments after `--` take precedence over everything else. They are Renovate's own:
+[configuration options](https://docs.renovatebot.com/configuration-options/) such as
+`includePaths`, as command-line flags.
 
 Renovate's working directory and caches are kept in the `renovate-preview` volume. To
 clear them: `podman volume rm renovate-preview`.
@@ -115,6 +123,10 @@ command:
 | `RENOVATE_TOKEN`                                | GitHub token. Required for `@owner/repo`.                          |
 | `RENOVATE_GITHUB_COM_TOKEN`, `GITHUB_COM_TOKEN` | Authenticates version lookups on github.com, avoiding rate limits. |
 
+`renovate-preview --pat-url` links to GitHub's form for a
+[personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens),
+pre-filled with the read-only permissions a dry run needs.
+
 No other variable reaches Renovate unless you name it with `--env NAME`, for example a
 private registry's credentials, as Renovate
 [reads them from the environment](https://docs.renovatebot.com/self-hosted-configuration/#detecthostrulesfromenv):
@@ -123,7 +135,8 @@ private registry's credentials, as Renovate
 renovate-preview --env DOCKER_REGISTRY_EXAMPLE_COM_USERNAME --env DOCKER_REGISTRY_EXAMPLE_COM_PASSWORD
 ```
 
-Renovate's settings are its arguments, after `--`. For example, `@owner/repo` on GitLab:
+Renovate's settings are its arguments, after `--`. For example, `@owner/repo` on GitLab,
+another of Renovate's [platforms](https://docs.renovatebot.com/modules/platform/):
 
 ```sh
 renovate-preview @owner/repo -- --platform=gitlab --endpoint=https://gitlab.example.com/api/v4/
@@ -148,11 +161,10 @@ export RENOVATE_PREVIEW_COLUMNS=dependency,current,new,type,age,file
 
 ## Configuration
 
-Which configuration wins, and why: [docs/configuration.org](https://github.com/kwentine/renovate-preview/blob/main/docs/configuration.org).
-
 ### Global
 
-`--global-config FILE` gives Renovate a self-hosted (global) config.
+`--global-config FILE` gives Renovate a
+[self-hosted (global) config](https://docs.renovatebot.com/self-hosted-configuration/).
 
 ### Repository
 
@@ -199,7 +211,8 @@ renovate-preview examples/custom-manager-regex
 
 ## Development
 
-The tests need pytest: `uv run make test` installs it in `.venv`, with ruff.
+The tests need [pytest](https://docs.pytest.org/), and the linter is
+[ruff](https://docs.astral.sh/ruff/): `uv run make test` installs both in `.venv`.
 
 ```sh
 make test        # unit tests (or: make check)
