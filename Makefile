@@ -8,7 +8,7 @@
 #   make lint          ruff
 #   make build         wheel and sdist, in dist/
 #   make distcheck     build, check the metadata, and run the wheel as installed
-#   make publish       upload dist/ to PyPI (needs UV_PUBLISH_TOKEN): see docs/packaging.org
+#   make publish       upload dist/ to PyPI (needs UV_PUBLISH_TOKEN)
 #   make clean
 #
 # Variables follow the GNU conventions, and can be set on the command line:

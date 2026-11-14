@@ -36,7 +36,16 @@ path = "src/renovate_preview/__init__.py"
 packages = ["src/renovate_preview"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/renovate_preview", "tests", "examples", "docs", "README.md", "Makefile", "LICENSE"]
+# Docs one by one: only those proofread, and committed.
+include = [
+  "src/renovate_preview",
+  "tests",
+  "examples",
+  "docs/good-to-know.org",
+  "README.md",
+  "Makefile",
+  "LICENSE",
+]
 
 [tool.ruff]
 line-length = 99
