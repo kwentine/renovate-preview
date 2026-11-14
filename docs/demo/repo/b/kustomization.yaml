@@ -1,4 +1,0 @@
-helmCharts:
-- name: cert-manager
-  repo: https://charts.jetstack.io
-  version: v1.20.2
