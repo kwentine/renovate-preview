@@ -1,8 +1,6 @@
 #+TITLE: Good to know
 #+OPTIONS: toc:nil num:nil
 
-What can surprise you in a preview, and why.
-
 * What Renovate sees
 
 ** Only files known to git
@@ -68,8 +66,6 @@ LOG_FORMAT= LOG_LEVEL=info renovate-config-validator --no-global renovate.json
 #+end_src
 
 =LOG_FORMAT== is there because the shell has renovate-preview's =LOG_FORMAT=json=.
-
-Which configuration wins, and why: [[file:configuration.org][configuration.org]].
 
 * Runs and their logs
 
