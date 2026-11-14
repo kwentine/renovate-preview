@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "renovate-preview"
 dynamic = ["version"]  # from src/renovate_preview/__init__.py
-description = "Dry-run Renovate against a repository and see what it would do."
+description = "Perform a Renovate dry run and preview the results."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

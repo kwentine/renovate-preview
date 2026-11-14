@@ -1,6 +1,6 @@
 # renovate-preview
 
-Perform a [Renovate](https://docs.renovatebot.com/) dry run to preview the results.
+Perform a [Renovate](https://docs.renovatebot.com/) dry run and preview the results.
 
 Renovate executes in a container from the
 [`ghcr.io/renovatebot/renovate`](https://docs.renovatebot.com/getting-started/running/#docker-images)
