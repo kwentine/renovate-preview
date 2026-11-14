@@ -12,6 +12,11 @@ import json
 
 LEVELS = {10: "trace", 20: "debug", 30: "info", 40: "warn", 50: "error", 60: "fatal"}
 
+# With --print-config (renovate-preview --show-config), Renovate logs the repository's
+# config, presets resolved, defaults included, in this record's `config`. We leave out
+# its `hostRules`. https://docs.renovatebot.com/self-hosted-configuration/#printconfig
+RESOLVED_CONFIG = "Full resolved config and hostRules including presets"
+
 # What a record says about how far the run has got, for the progress hints.
 PHASES = {
     "Repository started": "reading configuration",
@@ -22,7 +27,7 @@ PHASES = {
 
 
 def parse_record(line: str) -> dict | None:
-    """A JSON log record, or None for the plain text Renovate interleaves with them."""
+    """Return a JSON log record, or None for the plain text Renovate interleaves."""
     if not line.startswith("{"):
         return None
     try:
@@ -37,7 +42,7 @@ def level(record: dict) -> str:
 
 
 def raw_report(records: list[dict]) -> dict | None:
-    """Renovate's report, as it printed it."""
+    """Return Renovate's report, as it printed it."""
     for record in records:
         if record.get("msg") == "Printing report" and isinstance(record.get("report"), dict):
             return record["report"]
@@ -45,18 +50,25 @@ def raw_report(records: list[dict]) -> dict | None:
 
 
 def summarize(target: str, records: list[dict]) -> dict:
-    """The document every output format renders."""
-    report, version, stats, problems = None, None, None, []
+    """Return the document every output format renders."""
+    report, version, stats, problems, config = None, None, None, [], None
     for record in records:
         msg = record.get("msg")
         if msg == "Printing report" and isinstance(record.get("report"), dict):
             report = record["report"]
+        elif msg == RESOLVED_CONFIG:
+            config = record.get("config")
         elif msg == "Repository started":
             version = record.get("renovateVersion")
         elif msg == "Dependency extraction complete":
             stats = (record.get("stats") or {}).get("total")
         if record.get("level", 0) >= 40:
             problem = f"{level(record).upper()}: {msg}"
+            # An invalid repository config stops the run: "Repository has invalid config",
+            # and why, in the error.
+            err = record.get("err") or {}
+            if err.get("validationMessage"):
+                problem += f": {err.get('validationSource')}: {err['validationMessage'].strip()}"
             if problem not in problems:
                 problems.append(problem)
 
@@ -83,16 +95,28 @@ def summarize(target: str, records: list[dict]) -> dict:
         "target": target,
         "renovate_version": version,
         "files_scanned": (stats or {}).get("fileCount"),
-        "updates": sorted(updates, key=lambda r: (r["file"], r["dependency"])),
+        "updates": sorted(updates, key=sort_key),
         "branches": branches,
         "problems": problems,
+        "config": config,
     }
+
+
+def sort_key(row: dict) -> tuple:
+    """Sort by dependency, then the new version's age, then the file.
+
+    Youngest first, unknown age last. The sort is stable: rows still tied stay in
+    Renovate's order.
+    """
+    age = row["age_days"]
+    return (str(row["dependency"] or "").lower(), age is None, age or 0, row["file"] or "")
 
 
 UPDATE_KEYS = (
     "new",
     "type",
     "branch",
+    "breaking",
     "age_days",
     "release_timestamp",
     "pending_checks",
@@ -101,7 +125,7 @@ UPDATE_KEYS = (
 
 
 def dependency_rows(manager: str, package_file: dict) -> list[dict]:
-    """One row per dependency, or one per available update when there are some."""
+    """Return one row per dependency, or one per available update when there are some."""
     rows = []
     for dep in package_file.get("deps") or []:
         current = dep.get("currentValue") or dep.get("currentVersion")
@@ -110,6 +134,7 @@ def dependency_rows(manager: str, package_file: dict) -> list[dict]:
             "current": current,
             "manager": manager,
             "datasource": dep.get("datasource"),
+            "versioning": dep.get("versioning"),
             "file": package_file.get("packageFile"),
             "skip_reason": dep.get("skipReason"),
         }
@@ -128,6 +153,8 @@ def dependency_rows(manager: str, package_file: dict) -> list[dict]:
                     "new": new,
                     "type": update.get("updateType"),
                     "branch": update.get("branchName"),
+                    # As the versioning scheme says: under semver, any 0.x change is.
+                    "breaking": update.get("isBreaking"),
                     # Absent when the datasource gives no release timestamp.
                     "age_days": update.get("newVersionAgeInDays"),
                     "release_timestamp": update.get("releaseTimestamp"),

@@ -1,12 +1,27 @@
-"""Renovate's side: renovate-preview's options translated into Renovate's arguments and
-environment."""
+"""Renovate's side of a run: its command line and its environment.
+
+The functions here are pure: they compute from three values, and never read the process
+environment themselves.
+
+opts
+    renovate-preview's own options, from ``cli.parse_args()``. ``opts.remote`` is
+    "owner/repo" for a remote repository; otherwise it is None, and ``opts.directory`` is
+    the local repository's absolute path.
+theirs
+    The arguments after ``--``, passed on to Renovate as they are.
+environ
+    renovate-preview's environment, a mapping like ``os.environ``.
+
+``container_args()`` is what goes after the image in ``podman run ... IMAGE``.
+"""
 
 from __future__ import annotations
 
-import json
-import os
-from dataclasses import dataclass
+import argparse
+from collections.abc import Mapping
 from pathlib import Path
+
+GITHUB = "github.com"
 
 # Config file names Renovate looks for, in its own order of preference.
 CONFIG_FILE_NAMES = (
@@ -17,135 +32,107 @@ CONFIG_FILE_NAMES = (
     ".github/renovate.json",
     ".gitlab/renovate.json",
 )
-# Renovate's default ignorePaths, which a CLI --ignore-paths replaces.
-DEFAULT_IGNORE_PATHS = ("**/node_modules/**", "**/bower_components/**")
-GLOB_CHARS = set("*?[]{}!")
-# Any of these authenticates github.com version lookups (the last two as host rules).
-LOOKUP_TOKENS = ("RENOVATE_TOKEN", "RENOVATE_GITHUB_COM_TOKEN", "GITHUB_COM_TOKEN")
+
+# Where config files are mounted in the container: CONFIG_DIR/<name><extension>.
+CONFIG_DIR = "/renovate-preview"
+
+# The user's variables that Renovate gets, by name only, so that their values stay out of
+# the command line. Each authenticates version lookups on github.com (the last two as host
+# rules); RENOVATE_TOKEN is also the token of the platform, for @owner/repo. --env adds more.
+FORWARDED = ("RENOVATE_TOKEN", "RENOVATE_GITHUB_COM_TOKEN", "GITHUB_COM_TOKEN")
+
+# What every preview sets. Renovate's knobs are its arguments, after `--`.
+ENVIRONMENT = {
+    "NODE_OPTIONS": "--no-deprecation",
+    "LOG_LEVEL": "debug",
+    "LOG_FORMAT": "json",
+    "RENOVATE_DETECT_HOST_RULES_FROM_ENV": "true",
+    "RENOVATE_REPOSITORY_CACHE": "enabled",
+}
+
+# The few of Renovate's flags we look at, when they come after `--`. Abbreviations off:
+# Renovate (commander) takes none. A bare --dry-run is Renovate's to reject.
+THEIR_FLAGS = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+THEIR_FLAGS.add_argument("--dry-run", nargs="?")
 
 
-@dataclass
-class Target:
-    """What Renovate runs against: a local directory, or a remote repository."""
-
-    remote: bool
-    value: str  # absolute directory, or org/repo
-
-    @classmethod
-    def parse(cls, repository: str | None) -> Target:
-        if repository and repository.startswith("@"):
-            return cls(True, repository[1:])
-        return cls(False, str(Path(repository or ".").resolve()))
+def their_flags(theirs: list[str]) -> argparse.Namespace:
+    """Parse the flags of THEIR_FLAGS in `theirs`, as ``--dry-run=x`` or ``--dry-run x``."""
+    known, _ = THEIR_FLAGS.parse_known_args(theirs)
+    return known
 
 
-def arguments(opts, target: Target) -> list[str]:
-    """Renovate's command line. Arguments passed after `--` win over ours: we drop a flag of
-    ours that they also give, and --force-cli makes them win over the repository config."""
+def container_args(opts: argparse.Namespace, theirs: list[str]) -> list[str]:
+    """Return Renovate's command line.
+
+    Ours come first, then `theirs`, which win: we drop a flag of ours that they give
+    too, and --force-cli makes them win over the repository config.
+    """
     ours = {"--report-type": "logging"}
-    if opts.just_extract:
+    if opts.extract:
         ours["--dry-run"] = "extract"
-    elif not opts.run:
+    else:
         # The local platform can't do 'full': it would silently downgrade to 'lookup'.
-        ours["--dry-run"] = "full" if target.remote else "lookup"
-    if opts.managers:
-        ours["--enabled-managers"] = opts.managers
-    if opts.only:
-        ours["--include-paths"] = ",".join(include_paths(opts.only))
-    if opts.excluded:
-        ours["--ignore-paths"] = ",".join(ignore_paths(opts.excluded, target))
-    if opts.passthrough:
+        ours["--dry-run"] = "full" if opts.remote else "lookup"
+    if opts.show_config:
+        ours["--print-config"] = "true"
+    if theirs:
         # Renovate's default, but a global config could turn it off.
         ours["--force-cli"] = "true"
-    # RENOVATE_PLATFORM (with RENOVATE_ENDPOINT) reaches GitLab, Forgejo...
-    remote_platform = os.environ.get("RENOVATE_PLATFORM", "github")
-    ours["--platform"] = remote_platform if target.remote else "local"
+    # Other platforms: -- --platform=gitlab --endpoint=...
+    ours["--platform"] = "github" if opts.remote else "local"
+    if opts.remote and opts.host != GITHUB:
+        ours["--endpoint"] = f"https://{opts.host}/api/v3/"  # GitHub Enterprise Server
 
-    theirs = {flag(arg) for arg in opts.passthrough}
-    args = [f"{name}={value}" for name, value in ours.items() if name not in theirs]
-    args += opts.passthrough
-    return [*args, target.value] if target.remote else args
+    given = {flag(arg) for arg in theirs}
+    args = [f"{name}={value}" for name, value in ours.items() if name not in given]
+    args += theirs
+    return [*args, opts.remote] if opts.remote else args
 
 
 def flag(arg: str) -> str:
-    """'--dry-run' for '--dry-run=full'."""
+    """Return the flag of an argument: '--dry-run' for '--dry-run=full'."""
     return arg.split("=", 1)[0]
 
 
-def passthrough_value(passthrough: list[str], name: str) -> str | None:
-    """The value given to flag `name` after `--`, as `--name=value` or `--name value`."""
-    for i, arg in enumerate(passthrough):
-        if arg.startswith(f"{name}="):
-            return arg.split("=", 1)[1]
-        if arg == name:
-            following = passthrough[i + 1 : i + 2]
-            return following[0] if following and not following[0].startswith("-") else ""
-    return None
+def inside(name: str, path: str) -> str:
+    """Return where the config file `path` is mounted in the container, as `name`."""
+    return f"{CONFIG_DIR}/{name}{Path(path).suffix}"
 
 
-def environment(global_config: str | None) -> dict[str, str]:
-    """`global_config`: where Renovate finds the global config file, if there is one."""
-    env = {
-        "NODE_OPTIONS": "--no-deprecation",
-        "LOG_LEVEL": "debug",
-        "LOG_FORMAT": "json",
-        "RENOVATE_DETECT_HOST_RULES_FROM_ENV": "true",
-        # Renovate's default ('required') skips a repository without a committed config.
-        "RENOVATE_REQUIRE_CONFIG": "optional",
-        "RENOVATE_REPOSITORY_CACHE": "enabled",
-    }
-    if global_config:
-        env["RENOVATE_CONFIG_FILE"] = global_config
+def environment(opts: argparse.Namespace) -> dict[str, str]:
+    """Return the variables we set for Renovate: ENVIRONMENT, and the config files."""
+    env = dict(ENVIRONMENT)
+    if opts.global_config:
+        env["RENOVATE_CONFIG_FILE"] = inside("global", opts.global_config)
+    if opts.config:
+        # Merged over the global config, where the repository's config would come.
+        env["RENOVATE_ADDITIONAL_CONFIG_FILE"] = inside("config", opts.config)
+        if opts.remote:
+            # Don't read the repository's own config at all. The local platform reads it
+            # regardless: it forces requireConfig=optional.
+            env["RENOVATE_REQUIRE_CONFIG"] = "ignored"
     return env
 
 
-def forwarded_environment() -> list[str]:
-    """Names of the user's variables passed on to Renovate: credentials and settings."""
-    return sorted(
-        k
-        for k in os.environ
-        if (k.startswith("RENOVATE_") and not k.startswith("RENOVATE_PREVIEW_"))
-        or k in LOOKUP_TOKENS
-    )
+def forwarded(opts: argparse.Namespace, environ: Mapping[str, str]) -> list[str]:
+    """Return the names of the variables Renovate gets from `environ`: those set."""
+    return [name for name in dict.fromkeys([*FORWARDED, *opts.env]) if name in environ]
 
 
 def find_config_file(directory: str) -> Path | None:
+    """Return the repository config Renovate would read in `directory`, if any."""
     for name in CONFIG_FILE_NAMES:
         if (Path(directory) / name).is_file():
             return Path(directory) / name
     return None
 
 
-def include_paths(value: str) -> list[str]:
-    """Renovate matches a bare `base` against a file of exactly that name; also add `base/**`."""
-    globs = []
-    for entry in filter(None, (e.strip().rstrip("/") for e in value.split(","))):
-        globs.append(entry)
-        if not GLOB_CHARS & set(entry):
-            globs.append(f"{entry}/**")
-    return globs
-
-
-def ignore_paths(value: str, target: Target) -> list[str]:
-    """--except adds to ignorePaths, but a CLI --ignore-paths *replaces* the configured value.
-
-    So restate Renovate's defaults and the repository's own list, when it is plain JSON.
-    """
-    globs = list(DEFAULT_IGNORE_PATHS)
-    config = None if target.remote else find_config_file(target.value)
-    if config:
-        try:
-            own = json.loads(config.read_text()).get("ignorePaths", [])
-            globs += [g for g in own if isinstance(g, str)]
-        except (OSError, ValueError, AttributeError):
-            pass
-    globs += [e.strip() for e in value.split(",") if e.strip()]
-    return list(dict.fromkeys(globs))
-
-
-def credentials_warning(just_extract: bool) -> str | None:
-    if just_extract or any(os.environ.get(name) for name in LOOKUP_TOKENS):
+def credentials_warning(environ: Mapping[str, str]) -> str | None:
+    """Return a warning if no variable authenticates version lookups."""
+    if any(environ.get(name) for name in FORWARDED):
         return None
     return (
-        f"none of {', '.join(LOOKUP_TOKENS)} is set: GitHub rate-limits anonymous version "
+        f"none of {', '.join(FORWARDED)} is set: GitHub rate-limits anonymous version "
         "lookups, and a throttled lookup looks just like 'no update available'."
     )

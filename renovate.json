@@ -3,6 +3,11 @@
   "extends": ["config:best-practices"],
   "description": "renovate-preview has no runtime dependencies, so there is little here. What there is matters: the fixtures under examples/ and docs/demo/ pin deliberately outdated versions, and an upgrade PR against one of them would break the expectation it exists to illustrate.",
   "ignorePaths": ["examples/**", "docs/demo/**"],
+  "lockFileMaintenance": {
+    "description": "uv.lock pins the dev tools (pytest, ruff), which pyproject.toml leaves unpinned: refresh it weekly, and merge when CI passes.",
+    "enabled": true,
+    "automerge": true
+  },
   "packageRules": [
     {
       "description": "Group the GitHub Actions bumps into one PR rather than a weekly trickle.",
