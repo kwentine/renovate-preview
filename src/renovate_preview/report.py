@@ -1,9 +1,7 @@
-"""Turning Renovate's JSON log into a summary.
+"""Summarize Renovate's JSON log.
 
-With `--report-type=logging`, Renovate emits one "Printing report" record holding the
-package files it extracted (with the available updates) and the branches it would create.
-Everything shown to the user comes from that record, plus the warnings and errors logged
-along the way.
+With ``--report-type=logging``, Renovate logs a "Printing report" record: the package
+files, their updates, and the branches it would create.
 """
 
 from __future__ import annotations
@@ -50,7 +48,7 @@ def raw_report(records: list[dict]) -> dict | None:
 
 
 def summarize(target: str, records: list[dict]) -> dict:
-    """Return the document every output format renders."""
+    """Return the document the output formats render."""
     report, version, stats, problems, config = None, None, None, [], None
     for record in records:
         msg = record.get("msg")

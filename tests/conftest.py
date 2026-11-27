@@ -70,7 +70,7 @@ def run(capsys, tmp_path):
 def renovate(monkeypatch):
     """Return a function that makes the container output `lines` and exit with `status`."""
 
-    def renovate(*lines: str, status: int = 0) -> None:
+    def renovate(*lines: str, status: int = 0, image: bool = True) -> None:
         def fake(argv, on_line):
             for line in lines:
                 on_line(line)
