@@ -119,12 +119,11 @@ def preview(opts: Options, theirs: list[str]) -> int:
         log.error(
             "%s could not run Renovate (status %s): see its error above.\n"
             "  If the image is missing, pull it: %s pull %s\n"
-            "  or choose another one: --image, --tag (see: %s images)",
+            "  or specify another one using the --image and --tag options.",
             engine,
             status,
             engine,
             image,
-            engine,
         )
         return status
     records = [r for r in map(parse_record, lines) if r is not None]

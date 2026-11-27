@@ -375,7 +375,7 @@ def test_missing_image(run, renovate):
         "renovate-preview: error: podman could not run Renovate (status 125): see its error "
         "above.",
         "  If the image is missing, pull it: podman pull ghcr.io/renovatebot/renovate:1.2.3",
-        "  or choose another one: --image, --tag (see: podman images)",
+        "  or specify another one using the --image and --tag options.",
     ]
 
 
