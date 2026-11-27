@@ -9,22 +9,23 @@ container_args
     What goes after the image: Renovate's arguments (``renovate.container_args()``), or
     another program of the image and its arguments.
 
-As in ``renovate.py``, `opts` is renovate-preview's options and `environ` its environment.
-Only ``detect_engine()`` and ``run()`` look outside.
+As in ``renovate.py``, `opts` is renovate-preview's options. Only ``detect_engine()`` and
+``run()`` look outside.
 """
 
 from __future__ import annotations
 
-import argparse
 import logging
 import shlex
 import shutil
 import subprocess
-from collections.abc import Mapping
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import renovate
 from .report import PHASES, level, parse_record
+
+if TYPE_CHECKING:  # options.py imports this module.
+    from .options import Options
 
 log = logging.getLogger(__name__)
 
@@ -51,16 +52,16 @@ GIT_SAFE_DIRECTORY = {
 }
 
 
-def mounts(opts: argparse.Namespace) -> list[tuple[str, str]]:
+def mounts(opts: Options) -> list[tuple[str, str]]:
     """Return the (host, inside) paths to mount: the local repository, the config files."""
-    pairs = [] if opts.remote else [(opts.directory, REPO_MOUNT)]
+    pairs = [] if opts.remote else [(str(opts.directory.resolve()), REPO_MOUNT)]
     for name, path in (("global", opts.global_config), ("config", opts.config)):
         if path:
-            pairs.append((str(Path(path).resolve()), renovate.inside(name, path)))
+            pairs.append((str(path.resolve()), renovate.inside(name, path)))
     return pairs
 
 
-def runtime_args(opts: argparse.Namespace, environ: Mapping[str, str]) -> list[str]:
+def runtime_args(opts: Options) -> list[str]:
     """Return the runtime arguments of a preview, or of its --shell."""
     env = renovate.environment(opts)
     # Never pull: a missing image is an error, and pulling is the user's decision.
@@ -69,7 +70,7 @@ def runtime_args(opts: argparse.Namespace, environ: Mapping[str, str]) -> list[s
         args.append("-it")
     if opts.name:
         args += ["--name", opts.name]
-    for name in renovate.forwarded(opts, environ):
+    for name in opts.forwarded:
         if name not in env:
             args += ["-e", name]
     for key, value in {**env, **GIT_SAFE_DIRECTORY}.items():

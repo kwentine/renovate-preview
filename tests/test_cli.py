@@ -1,11 +1,21 @@
 import io
 import json
+from dataclasses import fields
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from renovate_preview.cli import check, column_names, last_run, parse_args
+from renovate_preview.cli import check
+from renovate_preview.options import (
+    PARAMETERS,
+    Options,
+    Source,
+    columns,
+    last_run,
+    parse_args,
+    parser,
+)
 from renovate_preview.render import COLUMNS
 
 from .conftest import INVALID_CONFIG, RELEASE_AGE
@@ -22,7 +32,7 @@ LINES = (
 
 def test_everything_after_double_dash_is_passed_through():
     opts, theirs = parse_args(["repo", "--", "--foo", "--", "bar"], {})
-    assert opts.repository == "repo"
+    assert opts.repository == Path("repo")
     assert theirs == ["--foo", "--", "bar"]
 
 
@@ -30,7 +40,7 @@ def test_the_repository_is_resolved_once():
     opts, _ = parse_args(["@o/r"], {})
     assert (opts.remote, opts.directory) == ("o/r", None)
     opts, _ = parse_args([], {})
-    assert (opts.remote, opts.directory) == (None, str(Path.cwd()))
+    assert (opts.remote, opts.directory) == (None, Path("."))
 
 
 @pytest.mark.parametrize(
@@ -53,7 +63,7 @@ def test_contradictions_are_rejected(run, argv):
 
 def test_unknown_column_points_to_help(run):
     _, _, err = run("--columns", "dep", "--just-print")
-    assert "unknown column(s) dep: see --columns=help" in err
+    assert "error: --columns: unknown column(s) dep, see --columns=help" in err
 
 
 def test_columns_help(run):
@@ -66,8 +76,8 @@ def test_columns_help(run):
 
 
 def test_columns_all():
-    assert column_names("all") == list(COLUMNS)
-    assert column_names(" new, file,") == ["new", "file"]
+    assert columns("all") == tuple(COLUMNS)
+    assert columns(" new, file,") == ("new", "file")
 
 
 def test_default_columns_depend_on_the_run(run):
@@ -97,9 +107,9 @@ def test_remote_needs_a_token(run):
 
 def test_check_returns_errors_and_warnings():
     opts, theirs = parse_args(["@o/r", "--env", "X"], {})
-    errors, warnings = check(opts, theirs, {})
+    errors, warnings = check(opts, theirs)
     assert errors == ["RENOVATE_TOKEN must be set to reach a remote repository (see --pat-url)"]
-    assert warnings[0] == "--env X: not set"
+    assert warnings[0] == "--env: X is not set"
     assert "GitHub rate-limits" in warnings[1]
 
 
@@ -127,12 +137,20 @@ def test_global_config_is_not_read_from_the_environment(run, tmp_path):
 def test_only_tokens_are_forwarded_and_env_adds_more(run):
     env = {"RENOVATE_TOKEN": "t", "RENOVATE_PLATFORM": "gitlab", "REGISTRY_PASSWORD": "p"}
     _, out, _ = run(".", "--just-print", env=env)
-    _, more, err = run(".", "--just-print", "--env", "REGISTRY_PASSWORD", "--env", "X", env=env)
+    _, more, err = run(".", "--just-print", "--env", "REGISTRY_PASSWORD,X", env=env)
     assert "-e RENOVATE_TOKEN \\" in out
     assert "RENOVATE_PLATFORM" not in out
     assert "REGISTRY_PASSWORD" not in out
     assert "-e REGISTRY_PASSWORD \\" in more
-    assert "--env X: not set" in err
+    assert "--env: X is not set" in err
+
+
+def test_env_from_the_environment(run):
+    env = {"RENOVATE_PREVIEW_ENV": "A, B", "A": "a"}
+    status, out, err = run(".", "--just-print", env=env)
+    assert status == 0
+    assert "-e A \\" in out
+    assert "RENOVATE_PREVIEW_ENV: B is not set" in err
 
 
 # Defaults from RENOVATE_PREVIEW_* variables
@@ -157,9 +175,68 @@ def test_defaults_from_the_environment(run, tmp_path):
 def test_options_win_over_the_environment():
     environ = {"RENOVATE_PREVIEW_HOST": "ghe.example.com", "RENOVATE_PREVIEW_COLUMNS": "file"}
     opts, _ = parse_args(["--host", "github.com", "--columns", "new"], environ)
-    assert (opts.host, opts.columns) == ("github.com", "new")
+    assert (opts.host, opts.columns) == ("github.com", ("new",))
     opts, _ = parse_args([], environ)
-    assert (opts.host, opts.columns) == ("ghe.example.com", "file")
+    assert (opts.host, opts.columns) == ("ghe.example.com", ("file",))
+
+
+def test_every_option_is_a_parameter():
+    dests = {action.dest for action in parser()._actions} - {"help", "version"}
+    assert set(PARAMETERS) - dests == {"default_env"}  # No flag.
+    assert [f.name for f in fields(Options)] == [*PARAMETERS, "forwarded", "last_run", "sources"]
+
+
+def test_the_last_option_wins():
+    # --env takes a list: the help says NAME[,NAME...].
+    opts, _ = parse_args(["--env", "A", "--env", "B,C"], {})
+    assert opts.env == ("B", "C")
+
+
+def test_every_bad_value_is_reported(run):
+    status, _, err = run("@nope", "--columns", "nope", env={"RENOVATE_PREVIEW_OUTPUT": "xml"})
+    assert status == 2
+    assert err.splitlines() == [
+        "renovate-preview: error: repository: '@nope' is not @owner/repo",
+        "renovate-preview: error: RENOVATE_PREVIEW_OUTPUT: 'xml' is not one of table, json, "
+        "html, raw, report",
+        "renovate-preview: error: --columns: unknown column(s) nope, see --columns=help",
+    ]
+
+
+def test_gitlab_subgroups():
+    opts, _ = parse_args(["@group/subgroup/repo"], {})
+    assert opts.remote == "group/subgroup/repo"
+
+
+def test_booleans_and_verbosity_from_the_environment(run):
+    env = {"RENOVATE_PREVIEW_EXTRACT": "yes", "RENOVATE_PREVIEW_VERBOSITY": "silent"}
+    opts, _ = parse_args([], env)
+    assert (opts.extract, opts.verbosity) == (True, "silent")
+    opts, _ = parse_args(["--verbose"], env)
+    assert opts.verbosity == "verbose"
+    status, _, err = run(".", "--just-print", env={"RENOVATE_PREVIEW_EXTRACT": "maybe"})
+    assert status == 2
+    assert "RENOVATE_PREVIEW_EXTRACT: 'maybe' is not a boolean" in err
+
+
+def test_more_defaults_from_the_environment(run):
+    env = {
+        "RENOVATE_PREVIEW_IMAGE": "example.com/renovate",
+        "RENOVATE_PREVIEW_TAG": "44.115.2",
+        "RENOVATE_PREVIEW_OUTPUT": "json",
+    }
+    opts, _ = parse_args([], env)
+    assert opts.output == "json"
+    _, out, _ = run(".", "--just-print", env=env)
+    assert "example.com/renovate:44.115.2" in out
+
+
+def test_the_help_shows_the_variables(run):
+    _, out, _ = run("--help")
+    assert "(default: $RENOVATE_PREVIEW_TAG, or latest)" in out
+    listed = out.split("from its environment")[1]
+    for name, parameter in PARAMETERS.items():
+        assert (f"RENOVATE_PREVIEW_{name.upper()}" in listed) == parameter.variable
 
 
 def test_a_variable_that_does_not_apply_is_ignored(run):
@@ -181,18 +258,23 @@ def test_a_value_names_its_origin(run, tmp_path):
     _, _, err = run(".", "--just-print", "--config", "nope.json", env=env)
     assert "--config: no such config file: nope.json" in err
     opts, _ = parse_args(["--config", "c.json"], {"RENOVATE_PREVIEW_HOST": "h"})
-    assert opts.origin == {
-        "global_config": "default",
-        "config": "cli",
-        "columns": "default",
-        "host": "env",
-    }
+    assert opts.sources["global_config"] is Source.DEFAULT
+    assert opts.sources["config"] is Source.CLI
+    assert opts.sources["host"] is Source.ENV
 
 
-def test_columns_from_the_environment_are_checked(run):
-    status, _, err = run("--just-print", env={"RENOVATE_PREVIEW_COLUMNS": "nope"})
+@pytest.mark.parametrize(
+    "variable, message",
+    [
+        ("RENOVATE_PREVIEW_COLUMNS=nope", "unknown column(s) nope"),
+        ("RENOVATE_PREVIEW_OUTPUT=xml", "'xml' is not one of table,"),
+    ],
+)
+def test_values_from_the_environment_are_checked(run, variable, message):
+    name, value = variable.split("=")
+    status, _, err = run("--just-print", env={name: value})
     assert status == 2
-    assert "RENOVATE_PREVIEW_COLUMNS: unknown column(s) nope" in err
+    assert f"error: {name}: {message}" in err
 
 
 def test_columns_from_the_environment_apply_to_a_replay(run):

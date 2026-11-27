@@ -1,9 +1,10 @@
-from renovate_preview.cli import parse_args
+from pathlib import Path
+
+from renovate_preview.options import parse_args
 from renovate_preview.renovate import (
     container_args,
     credentials_warning,
     environment,
-    forwarded,
     inside,
     their_flags,
 )
@@ -13,8 +14,8 @@ def args(*argv):
     return container_args(*parse_args(list(argv), {}))
 
 
-def opts(*argv):
-    return parse_args(list(argv), {})[0]
+def opts(*argv, environ=None):
+    return parse_args(list(argv), environ or {})[0]
 
 
 # Arguments
@@ -85,8 +86,8 @@ def test_their_flags():
 
 
 def test_inside_keeps_the_extension():
-    assert inside("global", "/a/b.json5") == "/renovate-preview/global.json5"
-    assert inside("config", "c") == "/renovate-preview/config"
+    assert inside("global", Path("/a/b.json5")) == "/renovate-preview/global.json5"
+    assert inside("config", Path("c")) == "/renovate-preview/config"
 
 
 def test_renovate_defaults_for_require_config():
@@ -112,11 +113,13 @@ def test_config_locally():
 
 
 def test_forwarded_tokens_and_env_when_set():
-    environ = {"RENOVATE_TOKEN": "x", "GITHUB_COM_TOKEN": "y", "RENOVATE_PLATFORM": "z", "A": ""}
-    assert forwarded(opts(), environ) == ["RENOVATE_TOKEN", "GITHUB_COM_TOKEN"]
-    assert forwarded(opts("--env", "A", "--env", "B"), environ)[-1] == "A"
+    environ = {"RENOVATE_TOKEN": "x", "GITHUB_COM_TOKEN": "y", "RENOVATE_PLATFORM": "z", "C": "c"}
+    assert opts(environ=environ).forwarded == ("RENOVATE_TOKEN", "GITHUB_COM_TOKEN")
+    # Set means not empty, as for renovate-preview's own variables.
+    environ["A"] = ""
+    assert opts("--env", "A,B,C", environ=environ).forwarded[-1] == "C"
 
 
 def test_credentials_warning():
-    assert "GitHub rate-limits" in credentials_warning({})
-    assert credentials_warning({"GITHUB_COM_TOKEN": "y"}) is None
+    assert "GitHub rate-limits" in credentials_warning(opts())
+    assert credentials_warning(opts(environ={"GITHUB_COM_TOKEN": "y"})) is None

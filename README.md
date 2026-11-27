@@ -127,12 +127,12 @@ command:
 [personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens),
 pre-filled with the read-only permissions a dry run needs.
 
-No other variable reaches Renovate unless you name it with `--env NAME`, for example a
+No other variable reaches Renovate unless you name it with `--env NAME[,NAME...]`, for example a
 private registry's credentials, as Renovate
 [reads them from the environment](https://docs.renovatebot.com/self-hosted-configuration/#detecthostrulesfromenv):
 
 ```sh
-renovate-preview --env DOCKER_REGISTRY_EXAMPLE_COM_USERNAME --env DOCKER_REGISTRY_EXAMPLE_COM_PASSWORD
+renovate-preview --env DOCKER_REGISTRY_EXAMPLE_COM_USERNAME,DOCKER_REGISTRY_EXAMPLE_COM_PASSWORD
 ```
 
 Renovate's settings are its arguments, after `--`. For example, `@owner/repo` on GitLab,
@@ -144,12 +144,19 @@ renovate-preview @owner/repo -- --platform=gitlab --endpoint=https://gitlab.exam
 
 Defaults for renovate-preview's own options can come from its environment.
 
-| Variable                         | Default for       |
-|----------------------------------|-------------------|
-| `RENOVATE_PREVIEW_GLOBAL_CONFIG` | `--global-config` |
-| `RENOVATE_PREVIEW_CONFIG`        | `--config`        |
-| `RENOVATE_PREVIEW_COLUMNS`       | `--columns`       |
-| `RENOVATE_PREVIEW_HOST`          | `--host`          |
+| Variable                         | Default for              | Values                    |
+|----------------------------------|--------------------------|---------------------------|
+| `RENOVATE_PREVIEW_EXTRACT`       | `--extract`              | `true`, `false`           |
+| `RENOVATE_PREVIEW_GLOBAL_CONFIG` | `--global-config`        |                           |
+| `RENOVATE_PREVIEW_CONFIG`        | `--config`               |                           |
+| `RENOVATE_PREVIEW_HOST`          | `--host`                 |                           |
+| `RENOVATE_PREVIEW_OUTPUT`        | `--output`               |                           |
+| `RENOVATE_PREVIEW_COLUMNS`       | `--columns`              |                           |
+| `RENOVATE_PREVIEW_SHOW_CONFIG`   | `--show-config`          | `true`, `false`           |
+| `RENOVATE_PREVIEW_VERBOSITY`     | `--verbose`, `--silent`  | `silent`, `normal`, `verbose` |
+| `RENOVATE_PREVIEW_IMAGE`         | `--image`                |                           |
+| `RENOVATE_PREVIEW_TAG`           | `--tag`                  |                           |
+| `RENOVATE_PREVIEW_ENV`           | `--env`                  |                           |
 
 For example, in your shell's profile, so that every preview uses your organisation's
 self-hosted config, and your favourite columns:

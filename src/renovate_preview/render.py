@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+from collections.abc import Sequence
 from importlib.resources import files
 from string import Template
 
@@ -25,15 +26,8 @@ COLUMNS = {
 }
 
 
-def default_columns(extract: bool, remote: bool) -> list[str]:
-    """Return the columns shown by default: NEW needs lookups, PR TITLE a remote run."""
-    names = ["dependency", "current"]
-    if not extract:
-        names.append("new")
-    names.append("file")
-    if remote and not extract:
-        names.append("pr-title")
-    return names
+# The columns shown by default. A run adjusts them: see cli.columns_to_show().
+DEFAULT_COLUMNS = ("dependency", "current", "new", "file")
 
 
 def cell(row: dict, key: str) -> str:
@@ -62,7 +56,7 @@ def pending(row: dict) -> str:
     return held[-1] + (f" (+{len(held) - 1})" if len(held) > 1 else "")
 
 
-def table(document: dict, names: list[str]) -> str:
+def table(document: dict, names: Sequence[str]) -> str:
     rows = document["updates"]
     if not rows:
         return "No dependencies found."
@@ -84,7 +78,7 @@ def esc(value) -> str:
     return html.escape("" if value is None else str(value))
 
 
-def html_page(document: dict, names: list[str], show_config: bool = False) -> str:
+def html_page(document: dict, names: Sequence[str], show_config: bool = False) -> str:
     """Return the whole result as one self-contained page: no network, opens off disk."""
     rows = document["updates"]
     cols = [COLUMNS[name] for name in names]

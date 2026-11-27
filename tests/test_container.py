@@ -2,17 +2,17 @@ import logging
 
 import pytest
 
-from renovate_preview.cli import parse_args
 from renovate_preview.container import Progress, mounts, printable, runtime_args
+from renovate_preview.options import parse_args
 
 
-def opts(*argv):
-    return parse_args(list(argv), {})[0]
+def opts(*argv, environ=None):
+    return parse_args(list(argv), environ or {})[0]
 
 
 def command(*argv, environ=None):
     """Return a preview's whole command, as cli.preview() builds it, "--a" for Renovate."""
-    return ["podman", "run", *runtime_args(opts(*argv), environ or {}), "img:tag", "--a"]
+    return ["podman", "run", *runtime_args(opts(*argv, environ=environ)), "img:tag", "--a"]
 
 
 # Mounts
