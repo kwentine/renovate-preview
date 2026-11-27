@@ -32,7 +32,7 @@ LINES = (
 
 def test_everything_after_double_dash_is_passed_through():
     opts, theirs = parse_args(["repo", "--", "--foo", "--", "bar"], {})
-    assert opts.repository == Path("repo")
+    assert opts.repository == Path("repo").resolve()
     assert theirs == ["--foo", "--", "bar"]
 
 
@@ -40,7 +40,8 @@ def test_the_repository_is_resolved_once():
     opts, _ = parse_args(["@o/r"], {})
     assert (opts.remote, opts.directory) == ("o/r", None)
     opts, _ = parse_args([], {})
-    assert (opts.remote, opts.directory) == (None, Path("."))
+    assert (opts.remote, opts.directory) == (None, Path.cwd())
+    assert str(parse_args(["@o/r"], {})[0].repository) == "@o/r"
 
 
 @pytest.mark.parametrize(
@@ -301,16 +302,14 @@ def test_config_remote(run, tmp_path):
 
 
 def test_config_locally_warns_that_the_repository_config_wins(run, tmp_path):
-    repo, other, config = tmp_path / "repo", tmp_path / "other", tmp_path / "config.json"
-    repo.mkdir()
-    other.mkdir()
-    (repo / "renovate.json").write_text("{}")
+    config = tmp_path / "config.json"
     config.write_text("{}")
-    status, _, err = run(str(repo), "--config", str(config), "--just-print")
-    _, _, without_own = run(str(other), "--config", str(config), "--just-print")
+    status, _, err = run(str(tmp_path), "--config", str(config), "--just-print")
     assert status == 0
-    assert "renovate.json is read too, and wins over --config" in err
-    assert "wins over --config" not in without_own
+    assert "--config on a local repository: Renovate always uses the repository's config" in err
+    assert "with higher precedence than --config." in err
+    _, _, err = run(str(tmp_path), "--just-print", env={"RENOVATE_PREVIEW_CONFIG": str(config)})
+    assert "with higher precedence than RENOVATE_PREVIEW_CONFIG." in err
 
 
 def test_an_invalid_config_is_shown(run, renovate):
@@ -370,10 +369,14 @@ def test_version_is_shown(run, renovate):
 def test_missing_image(run, renovate):
     # The engine's message goes to the terminal, not through us: only its status does.
     renovate(status=125)
-    status, out, err = run(".", "--silent")
+    status, out, err = run(".", "--silent", "--tag", "1.2.3")
     assert (status, out) == (125, "")
-    assert "podman could not run Renovate (status 125)" in err
-    assert "podman pull ghcr.io/renovatebot/renovate:latest" in err
+    assert err.splitlines() == [
+        "renovate-preview: error: podman could not run Renovate (status 125): see its error "
+        "above.",
+        "  If the image is missing, pull it: podman pull ghcr.io/renovatebot/renovate:1.2.3",
+        "  or choose another one: --image, --tag (see: podman images)",
+    ]
 
 
 def test_renovate_stops_before_its_report(run, renovate):

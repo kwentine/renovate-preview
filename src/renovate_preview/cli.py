@@ -1,15 +1,6 @@
-"""The command line: the main flow.
+"""The main flow: parse the options, check them, run Renovate, show the result.
 
-``main()`` is the only code that reads the process environment, which it hands to
-``parse_args()``. With ``preview()``, it is the only code that runs anything. Everything
-it calls computes from two values:
-
-opts
-    Our options, from ``options.parse_args()``: an ``Options``, which also says where
-    each value comes from. What depends on several of them is decided here, with all of
-    them in view: ``columns_to_show()``, ``check()``.
-theirs
-    The arguments after ``--``, for Renovate.
+Only ``main()`` reads the process environment, and only ``preview()`` runs anything.
 """
 
 from __future__ import annotations
@@ -54,11 +45,7 @@ LEVELS = {"silent": logging.ERROR, "normal": logging.INFO, "verbose": logging.DE
 
 
 def setup_logging(verbosity: str) -> None:
-    """Send our messages to stderr.
-
-    Errors always; progress and warnings unless silent; Renovate's own log records when
-    verbose.
-    """
+    """Send our messages to stderr, as many as `verbosity` asks for."""
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(Formatter())
     log.handlers = [handler]
@@ -66,9 +53,14 @@ def setup_logging(verbosity: str) -> None:
     log.setLevel(LEVELS[verbosity])
 
 
-def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ) -> int:
+def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
+    """Run renovate-preview, by default with sys.argv and os.environ."""
+    if argv is None:
+        argv = sys.argv[1:]
+    if environ is None:
+        environ = os.environ
     try:
-        opts, theirs = parse_args(sys.argv[1:] if argv is None else argv, environ)
+        opts, theirs = parse_args(argv, environ)
     except UsageError as err:
         setup_logging("normal")
         for message in err.messages:
@@ -86,6 +78,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ)
 
 
 def preview(opts: Options, theirs: list[str]) -> int:
+    """Run Renovate, or replay a log, and show the result. Return the exit status."""
     if opts.pat_url:
         print(pat_url(opts.host))
         return 0
@@ -124,25 +117,27 @@ def preview(opts: Options, theirs: list[str]) -> int:
     if status in ENGINE_FAILURES:
         # The engine's own message is above, on stderr.
         log.error(
-            "%s could not run Renovate (status %s). If the image is missing: %s pull %s",
+            "%s could not run Renovate (status %s): see its error above.\n"
+            "  If the image is missing, pull it: %s pull %s\n"
+            "  or choose another one: --image, --tag (see: %s images)",
             engine,
             status,
             engine,
             image,
+            engine,
         )
         return status
     records = [r for r in map(parse_record, lines) if r is not None]
     keep_last_run(lines, opts.last_run)
-    target = f"@{opts.remote}" if opts.remote else str(opts.directory.resolve())
-    document = summarize(target, records)
+    document = summarize(str(opts.repository), records)
     return show(opts, document, lines, records, status)
 
 
 def check(opts: Options, theirs: list[str]) -> tuple[list[str], list[str]]:
-    """Validate options as a whole
+    """Validate the options as a whole: each one is valid on its own.
 
-    Each value taken separately is valid at this point.
-    Return: (errors, warnings)
+    Returns:
+        (errors, warnings). Any error means no run.
     """
     errors, warnings = [], []
     if opts.source:
@@ -161,19 +156,17 @@ def check(opts: Options, theirs: list[str]) -> tuple[list[str], list[str]]:
             "the local platform can't do a full dry run (Renovate turns it into 'lookup'). "
             "For PR titles, preview the remote repository: renovate-preview @owner/repo"
         )
-    if opts.remote and not opts.just_print and "RENOVATE_TOKEN" not in opts.forwarded:
+    if opts.remote and not opts.just_print and not opts.is_set("RENOVATE_TOKEN"):
         errors.append("RENOVATE_TOKEN must be set to reach a remote repository (see --pat-url)")
 
-    if opts.config and opts.directory and (own := renovate.find_config_file(opts.directory)):
+    if opts.config and opts.directory:
+        origin = opts.origin("config")
         warnings.append(
-            f"{own.relative_to(opts.directory)} is read too, and wins over "
-            f"{opts.origin('config')}: "
-            "Renovate's local platform always reads the repository's config"
+            f"{origin} on a local repository: Renovate always uses the repository's config "
+            f"if detected, with higher precedence than {origin}."
         )
     warnings += [
-        f"{opts.origin('env')}: {name} is not set"
-        for name in opts.env
-        if name not in opts.forwarded
+        f"{opts.origin('env')}: {name} is not set" for name in opts.env if not opts.is_set(name)
     ]
     runs_lookups = not (opts.extract or opts.shell or opts.just_print)
     if runs_lookups and (message := renovate.credentials_warning(opts)):
@@ -182,10 +175,9 @@ def check(opts: Options, theirs: list[str]) -> tuple[list[str], list[str]]:
 
 
 def show(opts: Options, document: dict, lines: list[str], records: list[dict], status: int) -> int:
-    """Write the output, and what Renovate had to say: the same for a run and a replay.
+    """Write the output, then Renovate's problems. Return the exit status.
 
-    When the run failed, json, raw and report are still written, for scripts and a closer
-    look; a table or a page would only mislead ("No dependencies found.").
+    A failed run still writes json, raw and report; a table or a page would mislead.
     """
     error = failure(document, records, status)
     if opts.show_config and document["config"] is None:
@@ -227,11 +219,7 @@ def keep_last_run(lines: list[str], path: Path) -> None:
 
 
 def replay(opts: Options) -> int:
-    """Render a log instead of a run (--from), as a run would be.
-
-    Options that only apply to a run are ignored, so a run's command line, with
-    `--from last` appended, shows that run again.
-    """
+    """Show a Renovate log (--from) as a run would. Options for a run are ignored."""
     if opts.source == "-":
         label, text = "stdin", sys.stdin.read()
     else:
@@ -274,7 +262,7 @@ def render(opts: Options, document: dict, lines: list[str], records: list[dict])
 
 
 def columns_to_show(opts: Options) -> tuple[str, ...]:
-    """Return the columns: the user's choice as is, or the default fitted to the run.
+    """Return the user's columns, or the default ones fitted to the run.
 
     NEW is empty without lookups, and PR TITLE needs a remote repository.
     """

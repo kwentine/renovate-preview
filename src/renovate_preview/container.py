@@ -1,16 +1,6 @@
-"""The container's side of a run: podman or docker, and what the container sees.
+"""The container: podman or docker, its arguments, and running it.
 
-A command is ``[engine, "run", *runtime_args, image, *container_args]``:
-
-runtime_args
-    What goes between ``podman run`` and the image: mounts, environment, working
-    directory. Built here, as a list, since those flags repeat.
-container_args
-    What goes after the image: Renovate's arguments (``renovate.container_args()``), or
-    another program of the image and its arguments.
-
-As in ``renovate.py``, `opts` is renovate-preview's options. Only ``detect_engine()`` and
-``run()`` look outside.
+A command is ``[engine, "run", *runtime_args(), image, *renovate.container_args()]``.
 """
 
 from __future__ import annotations
@@ -19,27 +9,18 @@ import logging
 import shlex
 import shutil
 import subprocess
-from typing import TYPE_CHECKING
 
 from . import renovate
+from .options import VOLUME, VOLUME_MOUNT, Options
 from .report import PHASES, level, parse_record
-
-if TYPE_CHECKING:  # options.py imports this module.
-    from .options import Options
 
 log = logging.getLogger(__name__)
 
-IMAGE = "ghcr.io/renovatebot/renovate"
-TAG = "latest"
 ENGINES = ("podman", "docker")
 # The exit statuses podman and docker keep for themselves: any other is the container's.
 # 125: the engine failed (a missing image, say); 126: the command can't be invoked; 127:
 # it isn't found. https://docs.podman.io/en/latest/markdown/podman-run.1.html#exit-status
 ENGINE_FAILURES = (125, 126, 127)
-# Renovate's working directory (baseDir): its caches, and the clones of remote repositories.
-# Kept in a named volume, so successive runs are fast.
-VOLUME = "renovate-preview"
-VOLUME_MOUNT = "/tmp/renovate"
 # The image's WORKDIR: `--platform local` examines the current directory.
 REPO_MOUNT = "/usr/src/app"
 # The bind-mounted repository is owned by a uid unknown inside the container, so git
@@ -53,8 +34,8 @@ GIT_SAFE_DIRECTORY = {
 
 
 def mounts(opts: Options) -> list[tuple[str, str]]:
-    """Return the (host, inside) paths to mount: the local repository, the config files."""
-    pairs = [] if opts.remote else [(str(opts.directory.resolve()), REPO_MOUNT)]
+    """Return the (host, inside) paths to mount."""
+    pairs = [] if opts.remote else [(str(opts.directory), REPO_MOUNT)]
     for name, path in (("global", opts.global_config), ("config", opts.config)):
         if path:
             pairs.append((str(path.resolve()), renovate.inside(name, path)))
@@ -62,7 +43,7 @@ def mounts(opts: Options) -> list[tuple[str, str]]:
 
 
 def runtime_args(opts: Options) -> list[str]:
-    """Return the runtime arguments of a preview, or of its --shell."""
+    """Return what goes between ``podman run`` and the image."""
     env = renovate.environment(opts)
     # Never pull: a missing image is an error, and pulling is the user's decision.
     args = ["--rm", "--pull=never"]
@@ -86,12 +67,12 @@ def runtime_args(opts: Options) -> list[str]:
 
 
 def detect_engine() -> str | None:
-    """Return podman, or else docker: whichever is installed."""
+    """Return podman, or else docker, if installed."""
     return next((name for name in ENGINES if shutil.which(name)), None)
 
 
 def printable(argv: list[str], head: int = 3) -> str:
-    """Return a command to paste, one option per line, `podman run --rm` kept together."""
+    """Return a command to paste, one option per line."""
     lines = [shlex.join(argv[:head])]
     takes_value = False
     for word in argv[head:]:
@@ -108,11 +89,7 @@ def printable(argv: list[str], head: int = 3) -> str:
 
 
 class Progress:
-    """Show what Renovate is doing as it runs.
-
-    The Renovate version, then each phase; or each of Renovate's log records with
-    --verbose (the DEBUG level).
-    """
+    """Log Renovate's version and phases as it runs; every record, when verbose."""
 
     def __init__(self, source: str):
         self.source = source
@@ -132,10 +109,10 @@ class Progress:
 
 
 def run(argv: list[str], on_line) -> tuple[int, list[str]]:
-    """Run the container, calling `on_line` on each line of its output as it arrives.
+    """Run the container, calling `on_line` on each line of its output.
 
-    Return its exit status and its output: Renovate's log, on stdout. Its stderr, where
-    the engine's errors and Renovate's command-line errors go, is the terminal's.
+    Returns:
+        The exit status, and the output: Renovate's log. Errors go to the terminal.
     """
     lines = []
     with subprocess.Popen(argv, stdout=subprocess.PIPE, text=True, bufsize=1) as proc:

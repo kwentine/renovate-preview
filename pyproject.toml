@@ -43,6 +43,7 @@ include = [
   "examples",
   "docs/good-to-know.org",
   "README.md",
+  "CHANGELOG.md",
   "Makefile",
   "LICENSE",
 ]
@@ -53,11 +54,12 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "D"]
-# Docstrings are optional, but follow PEP 257 when there is one.
+# Docstrings are optional; when there is one, it follows the Google Python Style Guide:
+# https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings
 ignore = ["D1"]
 
 [tool.ruff.lint.pydocstyle]
-convention = "pep257"
+convention = "google"
 
 [dependency-groups]
 dev = ["pytest", "ruff"]

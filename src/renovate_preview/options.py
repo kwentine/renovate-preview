@@ -1,19 +1,6 @@
-"""renovate-preview's options: from the command line and the environment to ``Options``.
+"""Parse the command line and the environment into ``Options``.
 
-A parameter is a name, a parser (a string in, a value out, ValueError otherwise), a
-default, and whether a RENOVATE_PREVIEW_<NAME> variable may set it. ``parse_args()``:
-
-1. extract: the command line and the environment give values, for the parameters they
-   have;
-2. resolve: per parameter, the first source that has a value wins;
-3. parse the strings, collecting every error;
-4. default the rest;
-5. read what else a run needs from the environment: which variables Renovate gets, and
-   where the last run is kept.
-
-The result is a frozen ``Options``, which also says where each value comes from. After
-parse_args(), nothing reads the environment. What depends on several options, and
-whether they are consistent, is up to the program.
+Each parameter has a parser, a default, and maybe a RENOVATE_PREVIEW_<NAME> variable.
 """
 
 from __future__ import annotations
@@ -28,9 +15,15 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 from . import __version__
-from .container import IMAGE, TAG, VOLUME, VOLUME_MOUNT
 from .render import COLUMNS, DEFAULT_COLUMNS
-from .renovate import GITHUB
+
+GITHUB = "github.com"
+IMAGE = "ghcr.io/renovatebot/renovate"
+TAG = "latest"
+# Renovate's working directory (baseDir): its caches, and the clones of remote repositories.
+# Kept in a named volume, so successive runs are fast.
+VOLUME = "renovate-preview"
+VOLUME_MOUNT = "/tmp/renovate"
 
 Output = Literal["table", "json", "html", "raw", "report"]
 Verbosity = Literal["silent", "normal", "verbose"]
@@ -45,7 +38,7 @@ class Source(enum.Enum):
 
 
 class UsageError(Exception):
-    """What's wrong with the command line or the environment: main() logs it, exits 2."""
+    """Invalid values, one message each."""
 
     def __init__(self, messages: list[str]):
         super().__init__("\n".join(messages))
@@ -57,6 +50,9 @@ class Remote:
     """A remote repository: @owner/repo on the command line."""
 
     slug: str  # "owner/repo"; GitLab's subgroups give more parts.
+
+    def __str__(self) -> str:
+        return f"@{self.slug}"
 
 
 # Parsers: a string in, a value out, ValueError otherwise. They know nothing of argparse
@@ -85,7 +81,7 @@ def one_of(choices: Any) -> Callable[[str], str]:
 
 def repository(value: str) -> Remote | Path:
     if not value.startswith("@"):
-        return Path(value)  # As given: resolving it reads the cwd, a fact of the run.
+        return Path(value)  # parse_args() resolves it: that reads the working directory.
     parts = value[1:].split("/")
     if len(parts) < 2 or not all(parts):
         raise ValueError(f"{value!r} is not @owner/repo")
@@ -104,7 +100,7 @@ def columns(value: str) -> tuple[str, ...]:
 
 
 def variable_names(value: str) -> tuple[str, ...]:
-    """Names, comma-separated. Never values, which would show in the command."""
+    """Parse comma-separated names: never values, which would show in the command."""
     names = tuple(name.strip() for name in value.split(",") if name.strip())
     if any("=" in name for name in names):
         raise ValueError("variable names only: set their values in your shell")
@@ -117,6 +113,8 @@ def path(value: str) -> Path:
 
 @dataclass(frozen=True)
 class Parameter:
+    """How the sources set an option."""
+
     parse: Callable[[str], Any] = str  # for a source that gives a string
     default: Any = None  # what the program gets when no source has a value
     variable: bool = True  # RENOVATE_PREVIEW_<NAME> may set it
@@ -192,7 +190,7 @@ PARAMETERS = {
 
 @dataclass(frozen=True)
 class Options:
-    """Everything a run needs from the command line and the environment, parsed."""
+    """What a run needs from the command line and the environment, parsed."""
 
     repository: Remote | Path
     extract: bool
@@ -214,19 +212,23 @@ class Options:
     shell: bool
     default_env: tuple[str, ...]
     # From the environment, not parameters.
-    forwarded: tuple[str, ...]  # The variables Renovate gets, by name: default_env, env.
+    forwarded: tuple[str, ...]  # Those of default_env and env that are set.
     last_run: Path  # Where a run keeps its log, for --from last.
     sources: Mapping[str, Source] = field(repr=False, compare=False)
 
     @property
     def remote(self) -> str | None:
-        """Return "owner/repo" for a remote repository; then `directory` is None."""
+        """The "owner/repo" of a remote repository; or None, for a local one."""
         return self.repository.slug if isinstance(self.repository, Remote) else None
 
     @property
     def directory(self) -> Path | None:
-        """Return the local repository, as given (relative or not)."""
+        """The local repository, an absolute path; or None, for a remote one."""
         return None if isinstance(self.repository, Remote) else self.repository
+
+    def is_set(self, variable: str) -> bool:
+        """Whether a variable of default_env or env is set, so passed on to Renovate."""
+        return variable in self.forwarded
 
     def given(self, name: str) -> bool:
         """Whether `name` is on the command line: an instruction, not a preference."""
@@ -237,10 +239,9 @@ class Options:
 
 
 def last_run(environ: Mapping[str, str]) -> Path:
-    """Return where each run keeps its log, for --from last: the last one only.
+    """Return where a run keeps its log: XDG state, ignored unless absolute.
 
-    Logs are "state" in the XDG Base Directory spec, whose variables are ignored unless
-    absolute: https://specifications.freedesktop.org/basedir-spec/latest/
+    https://specifications.freedesktop.org/basedir-spec/latest/
     """
     state = environ.get("XDG_STATE_HOME", "")
     home = Path(environ.get("HOME") or Path.home())
@@ -266,7 +267,7 @@ def origin(name: str, source: Source) -> str:
 
 
 def help_text(name: str) -> str:
-    """Return the help of a parameter: its own, then its variable and default value."""
+    """Return a parameter's help, with its variable and default."""
     parameter = PARAMETERS[name]
     sources = [f"${variable(name)}"] if parameter.variable else []
     if isinstance(parameter.default, tuple):
@@ -330,13 +331,13 @@ class ColumnsHelp(argparse.Action):
 
 
 def columns_help() -> str:
-    """Return the help of --columns=help: the names, and which column each shows."""
+    """Return the column names, and their titles."""
     lines = [f"{name:<12}{title}" for name, (title, _) in COLUMNS.items()]
     return "\n".join([*lines, "all         every column above"])
 
 
 def parser() -> argparse.ArgumentParser:
-    """Return the command line's parser. It gives the values given, and only those."""
+    """Return the command line's parser: no defaults, so it gives only what is given."""
     p = argparse.ArgumentParser(
         prog="renovate-preview",
         description="Dry-run Renovate against a repository and summarize what it would do.",
@@ -393,9 +394,10 @@ def parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: list[str], environ: Mapping[str, str]) -> tuple[Options, list[str]]:
-    """Return our options, and the arguments after `--`, Renovate's. Or raise UsageError.
+    """Return the options, and the arguments after `--`, which are Renovate's.
 
-    argparse itself rejects what isn't an option of ours, and exits.
+    Raises:
+        UsageError: for invalid values. argparse itself exits on an unknown option.
     """
     theirs: list[str] = []
     if "--" in argv:
@@ -430,8 +432,11 @@ def parse_args(argv: list[str], environ: Mapping[str, str]) -> tuple[Options, li
         raise UsageError(errors)
     # 4. Default the rest.
     values = {**{name: parameter.default for name, parameter in PARAMETERS.items()}, **parsed}
-    # 5. What else a run needs from the environment. Set means not empty, as for our own
-    # variables. The values stay in the environment: podman passes them on by name.
+    # 5. What else a run needs from the process: its working directory, its environment.
+    # Set means not empty, as for our own variables. The values stay in the environment:
+    # podman passes them on by name.
+    if isinstance(values["repository"], Path):
+        values["repository"] = values["repository"].resolve()
     names = dict.fromkeys([*values["default_env"], *values["env"]])
     values["forwarded"] = tuple(name for name in names if environ.get(name))
     values["last_run"] = last_run(environ)
